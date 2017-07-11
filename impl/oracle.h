@@ -37,36 +37,15 @@ struct Oracle {
 // # (S (NP ...
 // raw tokens
 // tokens with OOVs replaced
-class TopDownOracle : public Oracle {
+class KOracle : public Oracle {
  public:
-  TopDownOracle(cnn::Dict* termdict, cnn::Dict* adict, cnn::Dict* pdict, cnn::Dict* nontermdict) :
+  KOracle(cnn::Dict* termdict, cnn::Dict* adict, cnn::Dict* pdict, cnn::Dict* nontermdict) :
       Oracle(termdict, adict, pdict), nd(nontermdict) {}
   // if is_training is true, then both the "raw" tokens and the mapped tokens
   // will be read, and both will be available. if false, then only the mapped
   // tokens will be available
   void load_bdata(const std::string& file);
   void load_oracle(const std::string& file, bool is_training);
-  cnn::Dict* nd; // dictionary of nonterminal types
-};
-
-// oracle that predicts nonterminal symbols with a NT(X) action
-// the action NT(X) effectively introduces an "(X" on the stack
-// # (S (NP ...
-// raw tokens
-// tokens with OOVs replaced
-class TopDownOracleGen : public Oracle {
- public:
-  TopDownOracleGen(cnn::Dict* termdict, cnn::Dict* adict, cnn::Dict* pdict, cnn::Dict* nontermdict) :
-      Oracle(termdict, adict, pdict), nd(nontermdict) {}
-  void load_oracle(const std::string& file);
-  cnn::Dict* nd; // dictionary of nonterminal types
-};
-
-class TopDownOracleGen2 : public Oracle {
- public:
-  TopDownOracleGen2(cnn::Dict* termdict, cnn::Dict* adict, cnn::Dict* pdict, cnn::Dict* nontermdict) :
-      Oracle(termdict, adict, pdict), nd(nontermdict) {}
-  void load_oracle(const std::string& file);
   cnn::Dict* nd; // dictionary of nonterminal types
 };
 

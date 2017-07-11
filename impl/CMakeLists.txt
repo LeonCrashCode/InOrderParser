@@ -1,7 +1,8 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 
 foreach(TARGET
-	Kparser)
+	Kparser
+	Kparser-standard)
 ADD_EXECUTABLE(${TARGET} ${TARGET}.cc pretrained.cc eval.cc oracle.cc)
   target_link_libraries(${TARGET} cnn ${LIBS} pthread boost_iostreams)
   if(UNIX AND NOT APPLE)
