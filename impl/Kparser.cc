@@ -692,9 +692,9 @@ int main(int argc, char** argv) {
 
   Model model;
 
-  parser::TopDownOracle corpus(&termdict, &adict, &posdict, &ntermdict);
-  parser::TopDownOracle dev_corpus(&termdict, &adict, &posdict, &ntermdict);
-  parser::TopDownOracle test_corpus(&termdict, &adict, &posdict, &ntermdict);
+  parser::KOracle corpus(&termdict, &adict, &posdict, &ntermdict);
+  parser::KOracle dev_corpus(&termdict, &adict, &posdict, &ntermdict);
+  parser::KOracle test_corpus(&termdict, &adict, &posdict, &ntermdict);
   corpus.load_oracle(conf["training_data"].as<string>(), true);	
   corpus.load_bdata(conf["bracketing_dev_data"].as<string>());
 
