@@ -930,7 +930,7 @@ int main(int argc, char** argv) {
            dwords += sentence.size();
            for (unsigned z = 0; z < N_SAMPLES; ++z) {
              ComputationGraph hg;
-             vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,actions,&right,sample,true);
+             vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,actions,&right,true,true);
              int ti = 0;
              for (auto a : pred) {
              	cout << adict.Convert(a);
