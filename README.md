@@ -23,7 +23,7 @@ We borrow the code [get_oracle.py](https://github.com/clab/rnng/blob/master/get_
     ./pre2mid [development top-down oracle] > [development oracle]
     ./pre2mid [test top-down oracle] > [test oracle]
 
-If you want the related data, contact us.
+If you require the related data, contact us.
 
 #### Training
 
@@ -41,7 +41,7 @@ We provide the trained model file in [model](https://drive.google.com/file/d/0B1
 #### Sampling
 
     ./build/impl/Kparser --cnn-mem 1700 -x -T [training oracle] -p [test oracle] -C [test data in bracketed format] -P --pretrained_dim 100 -w [pretrained word embeddings] --lstm_input_dim 128 --hidden_dim 128 -m [model file] --alpha 0.8 -s 100 > samples.act
-    ./sample_mid2tree.py samples.act > samples.props
+    ./mid2tree.py samples.act > samples.trees
 
 The samples.props could be fed into following reranking components. 
 
