@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
-
+#include <strstream>
 namespace cnn { class Dict; }
 
 namespace parser {
@@ -15,6 +15,7 @@ struct Sentence {
   bool SizesMatch() const { return raw.size() == unk.size() && raw.size() == lc.size() && raw.size() == pos.size(); }
   size_t size() const { return raw.size(); }
   std::vector<int> raw, unk, lc, pos;
+  std::vector<std::string> surfaces;
 };
 
 // base class for transition based parse oracles

@@ -917,7 +917,6 @@ int main(int argc, char** argv) {
     }
   } // should do training?
   if (test_corpus.size() > 0) { // do test evaluation
-        bool sample = conf.count("samples") > 0;
         unsigned test_size = test_corpus.size();
         double llh = 0;
         double trs = 0;
@@ -925,25 +924,26 @@ int main(int argc, char** argv) {
         double dwords = 0;
         auto t_start = chrono::high_resolution_clock::now();
 	const vector<int> actions;
+	if(conf.count("samples")>0){
         for (unsigned sii = 0; sii < test_size; ++sii) {
            const auto& sentence=test_corpus.sents[sii];
            dwords += sentence.size();
            for (unsigned z = 0; z < N_SAMPLES; ++z) {
              ComputationGraph hg;
              vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,actions,&right,sample,true);
-             double lp = as_scalar(hg.incremental_forward());
-             cout << sii << " ||| " << -lp << " |||\n";
              int ti = 0;
              for (auto a : pred) {
              	cout << adict.Convert(a);
 		if (adict.Convert(a) == "SHIFT"){
-			cout<<" "<<termdict.Convert(sentence.raw[ti++]);
+			cout<<" "<<posdict.Convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
+			ti++;
 		}
 		cout << endl;
 	     }
              cout << endl;
            }
-       }
+         }
+         }
         ofstream out("test.act");
         t_start = chrono::high_resolution_clock::now();
         for (unsigned sii = 0; sii < test_size; ++sii) {
@@ -957,9 +957,14 @@ int main(int argc, char** argv) {
            }
            ComputationGraph hg;
            vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,vector<int>(),&right,true);
-           int ti = 0;
+           unsigned ti = 0;
            for (auto a : pred) {
-           	out << adict.Convert(a) << endl;
+           	out << adict.Convert(a);
+		if(adict.Convert(a) == "SHIFT"){
+			out<<" " << posdict.Convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
+			ti++;
+		}
+		out<<endl;
 	   }
            out << endl;
            double lp = 0;
@@ -969,21 +974,16 @@ int main(int argc, char** argv) {
         out.close();
         double err = (trs - right) / trs;
 
-        std::string command_1="python mid2tree.py test.act " + conf["test_data"].as<string>() + " > test.eval" ;
+        std::string command_1="python mid2tree.py test.act > test.eval" ;
         const char* cmd_1=command_1.c_str();
-        cerr<<system(cmd_1)<<"\n";
+        system(cmd_1);
 
-	//parser::EvalBResults res = parser::Evaluate("foo", pfx);
-        std::string command="python remove_dev_unk.py "+ corpus.devdata +" test.eval > evaluable.txt";
-        const char* cmd=command.c_str();
-        system(cmd);
-
-        std::string command2="EVALB/evalb -p EVALB/COLLINS.prm "+corpus.devdata+" evaluable.txt > evalbout.txt";
+        std::string command2="EVALB/evalb -p EVALB/COLLINS.prm "+corpus.devdata+" test.eval > test.evalout";
         const char* cmd2=command2.c_str();
 
         system(cmd2);
 
-        std::ifstream evalfile("evalbout.txt");
+        std::ifstream evalfile("test.evalout");
         std::string lineS;
         std::string brackstr="Bracketing FMeasure";
         double newfmeasure=0.0;

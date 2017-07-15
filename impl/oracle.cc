@@ -57,7 +57,7 @@ void KOracle::load_oracle(const string& file, bool is_training) {
     ++lc;
     //cerr << "line number = " << lc << endl;
     cur_acts.clear();
-    if (line.size() == 0 || (line[0] == '!' && line[1] == '#')) continue;
+    if (line.size() == 0 || (line[0] == '#' && line[2] == '(')) continue;
     sents.resize(sents.size() + 1);
     auto& cur_sent = sents.back();
     if (is_training) {  // at training time, we load both "UNKified" versions of the data, and raw versions
@@ -71,6 +71,9 @@ void KOracle::load_oracle(const string& file, bool is_training) {
     } else { // at test time, we ignore the raw strings and just use the "UNKified" versions
       ReadSentenceView(line, pd, &cur_sent.pos);
       getline(in, line);
+      istrstream istr(line.c_str());
+      string word;
+      while(istr>>word) cur_sent.surfaces.push_back(word);
       getline(in, line);
       ReadSentenceView(line, d, &cur_sent.lc);
       getline(in, line);
