@@ -36,6 +36,8 @@ Ensure the related file are linked into the current directory.
     
     ./build/impl/Kparser --cnn-mem 1700 -x -T [training oracle] -p [test oracle] -C [test data in bracketed format] -P --pretrained_dim 100 -w [pretrained word embeddings] --lstm_input_dim 128 --hidden_dim 128 -m [model file]
 
+The automatically generated file test.eval is the result file.
+
 We provide the trained model file in [model](https://drive.google.com/file/d/0B1VhP65vISjoWmNjN0pfTmh5Vnc/view?usp=sharing)
 
 #### Sampling
