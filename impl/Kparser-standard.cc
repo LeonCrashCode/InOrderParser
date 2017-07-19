@@ -33,26 +33,23 @@
 // dictionaries
 cnn::Dict termdict, ntermdict, adict, posdict;
 bool DEBUG;
-volatile bool requested_stop = false;
-unsigned IMPLICIT_REDUCE_AFTER_SHIFT = 0;
 unsigned LAYERS = 2;
-unsigned INPUT_DIM = 40;
-unsigned HIDDEN_DIM = 60;
-unsigned ACTION_DIM = 36;
-unsigned PRETRAINED_DIM = 50;
-unsigned LSTM_INPUT_DIM = 60;
-unsigned POS_DIM = 10;
-
+unsigned INPUT_DIM = 32;
+unsigned HIDDEN_DIM = 64;
+unsigned ACTION_DIM = 16;
+unsigned PRETRAINED_DIM = 100;
+unsigned LSTM_INPUT_DIM = 128;
+unsigned POS_DIM = 12;
 float ALPHA = 1.f;
 unsigned N_SAMPLES = 1;
+
 unsigned ACTION_SIZE = 0;
 unsigned VOCAB_SIZE = 0;
 unsigned NT_SIZE = 0;
-float DROPOUT = 0.0f;
 unsigned POS_SIZE = 0;
-std::map<int,int> action2NTindex;  // pass in index of action NT(X), return index of X
-bool USE_POS = false;  // in discriminative parser, incorporate POS information in token embedding
 
+std::map<int,int> action2NTindex;  // pass in index of action NT(X), return index of X
+std::map<std::string,int> train_dict;
 using namespace cnn::expr;
 using namespace cnn;
 using namespace std;
@@ -61,45 +58,21 @@ namespace po = boost::program_options;
 
 vector<unsigned> possible_actions;
 unordered_map<unsigned, vector<float>> pretrained;
-vector<bool> singletons; // used during training
 
 void InitCommandLine(int argc, char** argv, po::variables_map* conf) {
   po::options_description opts("Configuration options");
   opts.add_options()
-        ("training_data,T", po::value<string>(), "List of Transitions - Training corpus")
-        ("explicit_terminal_reduce,x", "[recommended] If set, the parser must explicitly process a REDUCE operation to complete a preterminal constituent")
-        ("dev_data,d", po::value<string>(), "Development corpus")
-        ("bracketing_dev_data,C", po::value<string>(), "Development bracketed corpus")
-
-        ("test_data,p", po::value<string>(), "Test corpus")
-        ("dropout,D", po::value<float>(), "Dropout rate")
+    //    ("training_data,T", po::value<string>(), "List of Transitions - Training corpus")
         ("samples,s", po::value<unsigned>(), "Sample N trees for each test sentence instead of greedy max decoding")
         ("alpha,a", po::value<float>(), "Flatten (0 < alpha < 1) or sharpen (1 < alpha) sampling distribution")
-        ("model,m", po::value<string>(), "Load saved model from this file")
-        ("use_pos_tags,P", "make POS tags visible to parser")
-        ("layers", po::value<unsigned>()->default_value(2), "number of LSTM layers")
-        ("action_dim", po::value<unsigned>()->default_value(16), "action embedding size")
-        ("pos_dim", po::value<unsigned>()->default_value(12), "POS dimension")
-        ("input_dim", po::value<unsigned>()->default_value(32), "input embedding size")
-        ("hidden_dim", po::value<unsigned>()->default_value(64), "hidden dimension")
-        ("pretrained_dim", po::value<unsigned>()->default_value(50), "pretrained input dimension")
-        ("lstm_input_dim", po::value<unsigned>()->default_value(60), "LSTM input dimension")
-        ("train,t", "Should training be run?")
+        ("model_dir,m", po::value<string>(), "Load saved model from this file")
         ("words,w", po::value<string>(), "Pretrained word embeddings")
-        ("beam_size,b", po::value<unsigned>()->default_value(1), "beam size")
+	("train_dict", po::value<string>(), "training lexical dictionary")
 	("debug","debug")
         ("help,h", "Help");
   po::options_description dcmdline_options;
   dcmdline_options.add(opts);
   po::store(parse_command_line(argc, argv, dcmdline_options), *conf);
-  if (conf->count("help")) {
-    cerr << dcmdline_options << endl;
-    exit(1);
-  }
-  if (conf->count("training_data") == 0) {
-    cerr << "Please specify --traing_data (-T): this is required to determine the vocabulary mapping, even if the parser is used in prediction mode.\n";
-    exit(1);
-  }
 }
 
 struct ParserBuilder {
@@ -158,24 +131,15 @@ struct ParserBuilder {
       p_stack_guard(model->add_parameters({LSTM_INPUT_DIM})),
 
       p_cW(model->add_parameters({LSTM_INPUT_DIM, LSTM_INPUT_DIM * 2})) {
-    if (IMPLICIT_REDUCE_AFTER_SHIFT) {
-      p_ptbias = model->add_parameters({LSTM_INPUT_DIM}); // preterminal bias (used with IMPLICIT_REDUCE_AFTER_SHIFT)
-      p_ptW = model->add_parameters({LSTM_INPUT_DIM, 2*LSTM_INPUT_DIM});    // preterminal W (used with IMPLICIT_REDUCE_AFTER_SHIFT)
-    }
-    if (USE_POS) {
+      
       p_pos = model->add_lookup_parameters(POS_SIZE, {POS_DIM});
       p_p2w = model->add_parameters({LSTM_INPUT_DIM, POS_DIM});
-    }
-    buffer_lstm = new LSTMBuilder(LAYERS, LSTM_INPUT_DIM, HIDDEN_DIM, model);
-    if (pretrained.size() > 0) {
+    
+      buffer_lstm = new LSTMBuilder(LAYERS, LSTM_INPUT_DIM, HIDDEN_DIM, model);
+      
       p_t = model->add_lookup_parameters(VOCAB_SIZE, {PRETRAINED_DIM});
-      for (auto it : pretrained)
-        p_t->Initialize(it.first, it.second);
+      for (auto it : pretrained) p_t->Initialize(it.first, it.second);
       p_t2l = model->add_parameters({LSTM_INPUT_DIM, PRETRAINED_DIM});
-    } else {
-      p_t = nullptr;
-      p_t2l = nullptr;
-    }
   }
 
 // checks to see if a proposed action is valid in discriminative models
@@ -215,7 +179,6 @@ static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsig
     if(nopen_parens == 0) return true;
     return false;
   }
-
 }
 
 
@@ -225,15 +188,12 @@ static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsig
 // parser training data
 // set sample=true to sample rather than max
 vector<unsigned> log_prob_parser(ComputationGraph* hg,
-                     const parser::Sentence& sent,
-                     const vector<int>& correct_actions,
-                     double *right,
-                     bool is_evaluation,
+                     const vector<int> raw,
+		     const vector<int> lc,
+		     const vector<int> pos,
                      bool sample = false) {
-if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
+if(DEBUG) cerr << "sent size: " << raw.size()<<"\n";
     vector<unsigned> results;
-    const bool build_training_graph = correct_actions.size() > 0;
-    bool apply_dropout = (DROPOUT && !is_evaluation);
     stack_lstm.new_graph(*hg);
     action_lstm.new_graph(*hg);
     const_lstm_fwd.new_graph(*hg);
@@ -242,40 +202,28 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     buffer_lstm->new_graph(*hg);
     buffer_lstm->start_new_sequence();
     action_lstm.start_new_sequence();
-    if (apply_dropout) {
-      stack_lstm.set_dropout(DROPOUT);
-      action_lstm.set_dropout(DROPOUT);
-      buffer_lstm->set_dropout(DROPOUT);
-      const_lstm_fwd.set_dropout(DROPOUT);
-      const_lstm_rev.set_dropout(DROPOUT);
-    } else {
-      stack_lstm.disable_dropout();
-      action_lstm.disable_dropout();
-      buffer_lstm->disable_dropout();
-      const_lstm_fwd.disable_dropout();
-      const_lstm_rev.disable_dropout();
-    }
+      
+    stack_lstm.disable_dropout();
+    action_lstm.disable_dropout();
+    buffer_lstm->disable_dropout();
+    const_lstm_fwd.disable_dropout();
+    const_lstm_rev.disable_dropout();
+
     // variables in the computation graph representing the parameters
     Expression pbias = parameter(*hg, p_pbias);
     Expression S = parameter(*hg, p_S);
     Expression B = parameter(*hg, p_B);
     Expression A = parameter(*hg, p_A);
-    Expression ptbias, ptW;
-    if (IMPLICIT_REDUCE_AFTER_SHIFT) {
-      ptbias = parameter(*hg, p_ptbias);
-      ptW = parameter(*hg, p_ptW);
-    }
-    Expression p2w;
-    if (USE_POS) {
-      p2w = parameter(*hg, p_p2w);
-    }
+    Expression p2w;  
+    p2w = parameter(*hg, p_p2w);
 
     Expression ib = parameter(*hg, p_ib);
     Expression cbias = parameter(*hg, p_cbias);
     Expression w2l = parameter(*hg, p_w2l);
     Expression t2l;
-    if (p_t2l)
-      t2l = parameter(*hg, p_t2l);
+      
+    t2l = parameter(*hg, p_t2l);
+    
     Expression p2a = parameter(*hg, p_p2a);
     Expression abias = parameter(*hg, p_abias);
     Expression action_start = parameter(*hg, p_action_start);
@@ -283,35 +231,31 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
 
     action_lstm.add_input(action_start);
 
-    vector<Expression> buffer(sent.size() + 1);  // variables representing word embeddings
-    vector<int> bufferi(sent.size() + 1);  // position of the words in the sentence
+    vector<Expression> buffer(raw.size() + 1);  // variables representing word embeddings
+    vector<int> bufferi(raw.size() + 1);  // position of the words in the sentence
     // precompute buffer representation from left to right
 
     // in the discriminative model, here we set up the buffer contents
-    for (unsigned i = 0; i < sent.size(); ++i) {
-        int wordid = sent.raw[i]; // this will be equal to unk at dev/test
-        if (build_training_graph && singletons.size() > wordid && singletons[wordid] && rand01() > 0.5)
-          wordid = sent.unk[i];
+    for (unsigned i = 0; i < raw.size(); ++i) {
+        int wordid = raw[i]; // this will be equal to unk at dev/test
         Expression w = lookup(*hg, p_w, wordid);
-
         vector<Expression> args = {ib, w2l, w}; // learn embeddings
-        if (p_t && pretrained.count(sent.lc[i])) {  // include fixed pretrained vectors?
-          Expression t = const_lookup(*hg, p_t, sent.lc[i]);
+        if (pretrained.count(lc[i])) {  // include fixed pretrained vectors?
+          Expression t = const_lookup(*hg, p_t, lc[i]);
           args.push_back(t2l);
           args.push_back(t);
         }
-        if (USE_POS) {
-          args.push_back(p2w);
-          args.push_back(lookup(*hg, p_pos, sent.pos[i]));
-        }
-        buffer[sent.size() - i] = rectify(affine_transform(args));
-        bufferi[sent.size() - i] = i;
+        args.push_back(p2w);
+        args.push_back(lookup(*hg, p_pos, pos[i]));
+
+        buffer[raw.size() - i] = rectify(affine_transform(args));
+        bufferi[raw.size() - i] = i;
     }
     // dummy symbol to represent the empty buffer
     buffer[0] = parameter(*hg, p_buffer_guard);
     bufferi[0] = -999;
-    for (auto& b : buffer)
-      buffer_lstm->add_input(b);
+    
+    for (auto& b : buffer) buffer_lstm->add_input(b);
 
     vector<Expression> stack;  // variables representing subtree embeddings
     vector<int> stacki; // position of words in the sentence of head of subtree
@@ -347,16 +291,6 @@ if(DEBUG){
 		cerr<<adict.Convert(current_valid_actions[i])<<" ";
 	}
 	cerr <<"\n";
-
-	unsigned j = 999;
-	for(unsigned i = 0; i < current_valid_actions.size(); i ++){
-                if(current_valid_actions[i] == correct_actions[action_count]) {j = i; break;}
-        }
-	if(j == 999){
-		cerr<<"gold out\n";
-		exit(1);
-	}
-
 }
       //cerr << "valid actions = " << current_valid_actions.size() << endl;
 
@@ -364,11 +298,7 @@ if(DEBUG){
       Expression stack_summary = stack_lstm.back();
       Expression action_summary = action_lstm.back();
       Expression buffer_summary = buffer_lstm->back();
-      if (apply_dropout) {
-        stack_summary = dropout(stack_summary, DROPOUT);
-        action_summary = dropout(action_summary, DROPOUT);
-        buffer_summary = dropout(buffer_summary, DROPOUT);
-      }
+     
       Expression p_t = affine_transform({pbias, S, stack_summary, B, buffer_summary, A, action_summary});
       Expression nlp_t = rectify(p_t);
       //if (build_training_graph) nlp_t = dropout(nlp_t, 0.4);
@@ -399,20 +329,9 @@ if(DEBUG){
         }
       }
       unsigned action = model_action;
-      if (build_training_graph) {  // if we have reference actions (for training) use the reference action
-        if (action_count >= correct_actions.size()) {
-          cerr << "Correct action list exhausted, but not in final parser state.\n";
-          abort();
-        }
-        action = correct_actions[action_count];
-        if (model_action == action) { (*right)++; }
-      } else {
-        //cerr << "Chosen action: " << adict.Convert(action) << endl;
-      }
       //cerr << "prob ="; for (unsigned i = 0; i < adist.size(); ++i) { cerr << ' ' << adict.Convert(i) << ':' << adist[i]; }
       //cerr << endl;
       ++action_count;
-      log_probs.push_back(pick(adiste, action));
       results.push_back(action);
 
       // add current action to action LSTM
@@ -447,26 +366,6 @@ if(DEBUG) {
 
       if (ac =='S' && ac2=='H') {  // SHIFT
         assert(buffer.size() > 1); // dummy symbol means > 1 (not >= 1)
-/*        if (IMPLICIT_REDUCE_AFTER_SHIFT) {
-          --nopen_parens;
-          int i = is_open_paren.size() - 1;
-          assert(is_open_paren[i] >= 0);
-          Expression nonterminal = lookup(*hg, p_ntup, is_open_paren[i]);
-          Expression terminal = buffer.back();
-          Expression c = concatenate({nonterminal, terminal});
-          Expression pt = rectify(affine_transform({ptbias, ptW, c}));
-          stack.pop_back();
-          stacki.pop_back();
-          stack_lstm.rewind_one_step();
-          buffer.pop_back();
-          bufferi.pop_back();
-          buffer_lstm->rewind_one_step();
-          is_open_paren.pop_back();
-          stack_lstm.add_input(pt);
-          stack.push_back(pt);
-          stacki.push_back(999);
-          is_open_paren.push_back(-1);
-        } else {*/
           stack.push_back(buffer.back());
           stack_lstm.add_input(buffer.back());
           stacki.push_back(bufferi.back());
@@ -474,7 +373,6 @@ if(DEBUG) {
           buffer_lstm->rewind_one_step();
           bufferi.pop_back();
           is_open_paren.push_back(-1);
-        //}
 	unary = 0;
       } else if (ac == 'N') { // NT
         ++nopen_parens;
@@ -536,10 +434,6 @@ if(DEBUG) cerr << "  number of children to reduce: " << nchildren << endl;
         }
         Expression cfwd = const_lstm_fwd.back();
         Expression crev = const_lstm_rev.back();
-        if (apply_dropout) {
-          cfwd = dropout(cfwd, DROPOUT);
-          crev = dropout(crev, DROPOUT);
-        }
         Expression c = concatenate({cfwd, crev});
         Expression composed = rectify(affine_transform({cbias, cW, c}));
         stack_lstm.add_input(composed);
@@ -551,21 +445,12 @@ if(DEBUG) cerr << "  number of children to reduce: " << nchildren << endl;
       }
       prev_a = ac;
     }
-    if (build_training_graph && action_count != correct_actions.size()) {
-      cerr << "Unexecuted actions remain but final state reached!\n";
-      abort();
-    }
     assert(stack.size() == 2); // guard symbol, root
     assert(stacki.size() == 2);
     assert(buffer.size() == 1); // guard symbol
     assert(bufferi.size() == 1);
-    Expression tot_neglogprob = -sum(log_probs);
-    assert(tot_neglogprob.pg != nullptr);
     return results;
   }
-
-
-
 
 struct ParserState {
   LSTMBuilder stack_lstm;
@@ -610,18 +495,74 @@ static bool all_complete(const vector<ParserState>& pq) {
   for (auto& ps : pq) if (!ps.complete) return false;
   return true;
 }
-
-
 };
-void signal_callback_handler(int /* signum */) {
-  if (requested_stop) {
-    cerr << "\nReceived SIGINT again, quitting.\n";
-    _exit(1);
-  }
-  cerr << "\nReceived SIGINT terminating optimization early...\n";
-  requested_stop = true;
-}
 
+bool islower(char c){if(c >= 'a' && c <= 'z') return true; return false;}
+bool isupper(char c){if(c >= 'A' && c <= 'Z') return true; return false;}
+bool isdigital(char c){if(c >= '0' && c <= '9') return true; return false;}
+bool isalpha(char c){if(islower(c) || isupper(c)) return true; return false;}
+
+std::string unkized(const std::string word){
+    int numCaps = 0;
+    bool hasDigit = false;
+    bool hasDash = false;
+    bool hasLower = false;
+    
+    std::string result = "UNK";
+    for(unsigned i = 0; i < word.size(); i ++){
+        if(isdigital(word[i])) hasDigit = true;
+	else if(word[i] == '-') hasDash = true;
+        else if(islower(word[i])) hasLower = true;
+	else if(isupper(word[i])) numCaps += 1;
+    }
+    string lower = word;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower); 
+    if(isupper(word[0])){
+        if(numCaps == 1) {
+	    result = result + "-INITC";
+	    if(train_dict.find(lower) != train_dict.end()) result = result + "-KNOWNLC";
+	}
+	else{
+	    result = result + "-CAPS";
+	}
+    }
+    else if(isalpha(word[0]) == false && numCaps > 0)	result = result + "-CAPS";
+    else if(hasLower) result = result + "-LC";
+    
+    if(hasDigit) result = result + "-NUM";
+    if(hasDash) result = result + "-DASH";
+
+    
+    if(lower.back() == 's' && lower.size() >= 3){
+    	char ch2 = lower.size() >= 2 ? lower[lower.size()-2] : '0';
+        if(ch2 != 's' && ch2 != 'i' && ch2 != 'u') result = result + "-s";
+    }
+    else if(lower.size() >= 5 && hasDash == false && (hasDigit == false || numCaps == 0)){
+      	char ch1 = lower.size() >= 1 ? lower[lower.size()-1] : '0';
+	char ch2 = lower.size() >= 2 ? lower[lower.size()-2] : '0';
+        char ch3 = lower.size() >= 3 ? lower[lower.size()-3] : '0';
+
+	if(ch2 == 'e' && ch1 == 'd')
+       	    result = result + "-ed";
+    	else if(ch3 == 'i' && ch2 == 'n' && ch1 == 'g')
+       	    result = result + "-ing";
+	else if(ch3 == 'i' && ch2 == 'o' && ch1 == 'n')
+            result = result + "-ion";
+	else if(ch2 == 'e' && ch1 == 'r')
+            result = result + "-er";
+	else if(ch3 == 'e' && ch2 == 's' && ch1 == 't')
+            result = result + "-est";
+	else if(ch2 == 'l' && ch1 == 'y')
+            result = result + "-ly";
+	else if(ch3 == 'i' && ch2 == 't' && ch1 == 'y')
+            result = result + "-ity";
+	else if(ch1 == 'y')
+            result = result + "-y";
+	else if(ch2 == 'a' && ch1 == 'l')
+	    result = result + "-al";
+    }
+    return result;
+}
 int main(int argc, char** argv) {
   cnn::Initialize(argc, argv);//, 1989121011);
 
@@ -633,21 +574,6 @@ int main(int argc, char** argv) {
   po::variables_map conf;
   InitCommandLine(argc, argv, &conf);
   DEBUG = conf.count("debug");
-  IMPLICIT_REDUCE_AFTER_SHIFT = conf.count("explicit_terminal_reduce") == 0;
-  USE_POS = conf.count("use_pos_tags");
-  if (conf.count("dropout"))
-    DROPOUT = conf["dropout"].as<float>();
-  LAYERS = conf["layers"].as<unsigned>();
-  INPUT_DIM = conf["input_dim"].as<unsigned>();
-  PRETRAINED_DIM = conf["pretrained_dim"].as<unsigned>();
-  HIDDEN_DIM = conf["hidden_dim"].as<unsigned>();
-  ACTION_DIM = conf["action_dim"].as<unsigned>();
-  LSTM_INPUT_DIM = conf["lstm_input_dim"].as<unsigned>();
-  POS_DIM = conf["pos_dim"].as<unsigned>();
-  if (conf.count("train") && conf.count("dev_data") == 0) {
-    cerr << "You specified --train but did not specify --dev_data FILE\n";
-    return 1;
-  }
   if (conf.count("alpha")) {
     ALPHA = conf["alpha"].as<float>();
     if (ALPHA <= 0.f) { cerr << "--alpha must be between 0 and +infty\n"; abort(); }
@@ -656,47 +582,74 @@ int main(int argc, char** argv) {
     N_SAMPLES = conf["samples"].as<unsigned>();
     if (N_SAMPLES == 0) { cerr << "Please specify N>0 samples\n"; abort(); }
   }
-  
-  ostringstream os;
-  os << "ntparse"
-     << (USE_POS ? "_pos" : "")
-     << '_' << IMPLICIT_REDUCE_AFTER_SHIFT
-     << '_' << LAYERS
-     << '_' << INPUT_DIM
-     << '_' << HIDDEN_DIM
-     << '_' << ACTION_DIM
-     << '_' << LSTM_INPUT_DIM
-     << "-pid" << getpid() << ".params";
-  const string fname = os.str();
-  cerr << "PARAMETER FILE: " << fname << endl;
-  bool softlinkCreated = false;
+
+  assert(conf.count("model_dir") && conf.count("words") && conf.count("train_dict"));
+  std::string model_dir = conf["model_dir"].as<string>();
 
   Model model;
 
-  parser::KOracle corpus(&termdict, &adict, &posdict, &ntermdict);
-  parser::KOracle dev_corpus(&termdict, &adict, &posdict, &ntermdict);
-  parser::KOracle test_corpus(&termdict, &adict, &posdict, &ntermdict);
-  corpus.load_oracle(conf["training_data"].as<string>(), true);	
+  //parser::KOracle corpus(&termdict, &adict, &posdict, &ntermdict);
+  //parser::KOracle dev_corpus(&termdict, &adict, &posdict, &ntermdict);
+  //parser::KOracle test_corpus(&termdict, &adict, &posdict, &ntermdict);
+  //corpus.load_oracle(conf["training_data"].as<string>(), true);	
+  {
+  std::string word;
+  ifstream ifs;
+  ifs.open(model_dir+"/terminal.dict");
+  while(ifs>>word) termdict.Convert(word);
+  ifs.close();
 
-  if (conf.count("words"))
-    parser::ReadEmbeddings_word2vec(conf["words"].as<string>(), &termdict, &pretrained);
+  ifs.open(model_dir+"/non-terminal.dict");
+  while(ifs>>word) ntermdict.Convert(word);
+  ifs.close();
+  
+  ifs.open(model_dir+"/action.dict");
+  while(ifs>>word) adict.Convert(word);
+  ifs.close();
 
-  // freeze dictionaries so we don't accidentaly load OOVs
+  ifs.open(model_dir+"/pos.dict");
+  while(ifs>>word) posdict.Convert(word);
+  ifs.close();
+
+  parser::ReadEmbeddings_word2vec(conf["words"].as<string>(), &termdict, &pretrained);
+
   termdict.Freeze();
-  termdict.SetUnk("UNK"); // we don't actually expect to use this often
-     // since the Oracles are required to be "pre-UNKified", but this prevents
-     // problems with UNKifying the lowercased data which needs to be loaded
+  termdict.SetUnk("UNK");
   adict.Freeze();
   ntermdict.Freeze();
-  posdict.Freeze();
+  posdict.Freeze(); 
+  }
 
-  {  // compute the singletons in the parser's training data
-    unordered_map<unsigned, unsigned> counts;
-    for (auto& sent : corpus.sents)
-      for (auto word : sent.raw) counts[word]++;
-    singletons.resize(termdict.size(), false);
-    for (auto wc : counts)
-      if (wc.second == 1) singletons[wc.first] = true;
+  /*ofstream ofs;
+  ofs.open("termdict");
+  for(int i = 0; i < termdict.size(); i ++){
+    ofs<< termdict.Convert(i)<<"\n";
+  }
+  ofs.close();
+
+  ofs.open("adict");
+  for(int i = 0; i < adict.size(); i ++){
+    ofs<< adict.Convert(i)<<"\n";
+  }
+  ofs.close();
+
+  ofs.open("ntermdict");
+  for(int i = 0; i < ntermdict.size(); i ++){
+    ofs<< ntermdict.Convert(i)<<"\n";
+  }
+  ofs.close();
+
+  ofs.open("posdict");
+  for(int i = 0; i < posdict.size(); i ++){
+    ofs<< posdict.Convert(i)<<"\n";
+  }
+  ofs.close();
+  exit(1);*/
+  {
+  std::string word;
+  ifstream ifs(conf["train_dict"].as<string>().c_str());
+  while(ifs>>word) train_dict[word] = 1;
+  ifs.close();
   }
 
   for (unsigned i = 0; i < adict.size(); ++i) {
@@ -717,97 +670,83 @@ int main(int argc, char** argv) {
     possible_actions[i] = i;
 
   ParserBuilder parser(&model, pretrained);
-  if (conf.count("model")) {
-    ifstream in(conf["model"].as<string>().c_str());
+    
+    cerr<<"Reading model from " <<model_dir<<"/model"<<" .....\n";
+    ifstream in((model_dir+"/model").c_str());
     boost::archive::text_iarchive ia(in);
     ia >> model;
-  }
- 
-  string line;
-  while(std::cin>>line){
-  
-        bool sample = conf.count("samples") > 0;
-        unsigned test_size = test_corpus.size();
-        double llh = 0;
-        double trs = 0;
-        double right = 0;
-        double dwords = 0;
-        auto t_start = chrono::high_resolution_clock::now();
-	const vector<int> actions;
-        for (unsigned sii = 0; sii < test_size; ++sii) {
-           const auto& sentence=test_corpus.sents[sii];
-           dwords += sentence.size();
-           for (unsigned z = 0; z < N_SAMPLES; ++z) {
-             ComputationGraph hg;
-             vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,actions,&right,sample,true);
-             double lp = as_scalar(hg.incremental_forward());
-             cout << sii << " ||| " << -lp << " |||\n";
-             int ti = 0;
-             for (auto a : pred) {
-             	cout << adict.Convert(a);
-		if (adict.Convert(a) == "SHIFT"){
-			cout<<" "<<termdict.Convert(sentence.raw[ti++]);
-		}
-		cout << endl;
-	     }
-             cout << endl;
-           }
-       }
-        ofstream out("test.act");
-        t_start = chrono::high_resolution_clock::now();
-        for (unsigned sii = 0; sii < test_size; ++sii) {
-           const auto& sentence=test_corpus.sents[sii];
-           const vector<int>& actions=test_corpus.actions[sii];
-           dwords += sentence.size();
-           {  ComputationGraph hg;
-              parser.log_prob_parser(&hg,sentence,actions,&right,true);
-              double lp = as_scalar(hg.incremental_forward());
-              llh += lp;
-           }
-           ComputationGraph hg;
-           vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,vector<int>(),&right,true);
-           int ti = 0;
-           for (auto a : pred) {
-           	out << adict.Convert(a) << endl;
-	   }
-           out << endl;
-           double lp = 0;
-           trs += actions.size();
-        }
-        auto t_end = chrono::high_resolution_clock::now();
-        out.close();
-        double err = (trs - right) / trs;
 
-        std::string command_1="python mid2tree.py test.act " + conf["test_data"].as<string>() + " > test.eval" ;
-        const char* cmd_1=command_1.c_str();
-        cerr<<system(cmd_1)<<"\n";
+  cerr<<"Please Input:\n";
+  {
+  std::string line;
+  std::string word;
+  vector<int> raw;
+  vector<int> lc;
+  vector<int> pos;
+  vector<std::string> words;
+  while(std::getline(std::cin, line)){
+    istrstream istr(line.c_str());
+    raw.clear();
+    lc.clear();
+    pos.clear();
+    words.clear();
+    while(istr>>word){
+      words.push_back(word);
 
-	//parser::EvalBResults res = parser::Evaluate("foo", pfx);
-        std::string command="python remove_dev_unk.py "+ corpus.devdata +" test.eval > evaluable.txt";
-        const char* cmd=command.c_str();
-        system(cmd);
+      if(train_dict.find(word) != train_dict.end()) raw.push_back(termdict.Convert(word));
+      else raw.push_back(termdict.Convert(unkized(word)));
 
-        std::string command2="EVALB/evalb -p EVALB/COLLINS.prm "+corpus.devdata+" evaluable.txt > evalbout.txt";
-        const char* cmd2=command2.c_str();
+      std::transform(word.begin(), word.end(), word.begin(), ::tolower);
+      lc.push_back(termdict.Convert(word));
 
-        system(cmd2);
+      istr>>word;
+      pos.push_back(posdict.Convert(word));
+    }
+  /*  for(unsigned i = 0; i < raw.size(); i ++){
+       cout << termdict.Convert(raw[i])<<" ";
+    }
+    cout << "||| ";
+    for(unsigned i = 0; i < raw.size(); i ++){
+       cout << termdict.Convert(lc[i])<<" ";
+    }
+    cout << "||| ";
 
-        std::ifstream evalfile("evalbout.txt");
-        std::string lineS;
-        std::string brackstr="Bracketing FMeasure";
-        double newfmeasure=0.0;
-        std::string strfmeasure="";
-        bool found=0;
-        while (getline(evalfile, lineS) && !newfmeasure){
-                if (lineS.compare(0, brackstr.length(), brackstr) == 0) {
-                        //std::cout<<lineS<<"\n";
-                        strfmeasure=lineS.substr(lineS.size()-5, lineS.size());
-                        std::string::size_type sz;
-                        newfmeasure = std::stod (strfmeasure,&sz);
-                        //std::cout<<strfmeasure<<"\n";
+    for(unsigned i = 0; i < raw.size(); i ++){
+       cout << posdict.Convert(pos[i])<<" ";
+    }
+    cout <<"\n";
+
+    cout.flush();*/
+    if(conf.count("samples")>0){
+	for (unsigned z = 0; z < N_SAMPLES; ++z) {
+	    ComputationGraph hg;
+	    vector<unsigned> pred = parser.log_prob_parser(&hg,raw, lc, pos, true);
+	    int ti = 0;
+	    for (auto a : pred) {
+                cout << adict.Convert(a);
+                if (adict.Convert(a) == "SHIFT"){
+                        cout<<" "<<posdict.Convert(pos[ti])<< " " <<words[ti];
+                        ti++;
                 }
+                cout << endl;
+            }
+            cout << endl;
+       }
+    }
+    else{
+        ComputationGraph hg;
+        vector<unsigned> pred = parser.log_prob_parser(&hg,raw, lc, pos, false);
+        int ti = 0;
+        for (auto a : pred) {
+            cout << adict.Convert(a);
+            if (adict.Convert(a) == "SHIFT"){
+            	cout<<" "<<posdict.Convert(pos[ti])<< " " <<words[ti];
+            	ti++;
+            }
+            cout << endl;
         }
-
-       cerr<<"F1score: "<<newfmeasure<<"\n";
-    
+        cout << endl;
+    }
+  }
+  }
 }

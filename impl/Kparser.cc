@@ -312,7 +312,6 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
         if (build_training_graph && singletons.size() > wordid && singletons[wordid] && rand01() > 0.5)
           wordid = sent.unk[i];
         Expression w = lookup(*hg, p_w, wordid);
-
         vector<Expression> args = {ib, w2l, w}; // learn embeddings
         if (p_t && pretrained.count(sent.lc[i])) {  // include fixed pretrained vectors?
           Expression t = const_lookup(*hg, p_t, sent.lc[i]);
@@ -329,6 +328,7 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     // dummy symbol to represent the empty buffer
     buffer[0] = parameter(*hg, p_buffer_guard);
     bufferi[0] = -999;
+    
     for (auto& b : buffer)
       buffer_lstm->add_input(b);
 
@@ -383,6 +383,7 @@ if(DEBUG){
       Expression stack_summary = stack_lstm.back();
       Expression action_summary = action_lstm.back();
       Expression buffer_summary = buffer_lstm->back();
+
       if (apply_dropout) {
         stack_summary = dropout(stack_summary, DROPOUT);
         action_summary = dropout(action_summary, DROPOUT);
@@ -949,6 +950,18 @@ int main(int argc, char** argv) {
         for (unsigned sii = 0; sii < test_size; ++sii) {
            const auto& sentence=test_corpus.sents[sii];
            const vector<int>& actions=test_corpus.actions[sii];
+/*	   for(unsigned i = 0; i < sentence.size(); i ++){
+	   	out << termdict.Convert(sentence.raw[i])<<" ";
+	   }
+	   out<<"||| ";
+           for(unsigned i = 0; i < sentence.size(); i ++){
+                out << termdict.Convert(sentence.lc[i])<<" ";
+           }
+	   out<<"||| ";
+	   for(unsigned i = 0; i < sentence.size(); i ++){
+                out << posdict.Convert(sentence.pos[i])<<" ";
+           }
+	   out<<"\n";*/
            dwords += sentence.size();
            {  ComputationGraph hg;
               parser.log_prob_parser(&hg,sentence,actions,&right,true);
@@ -970,6 +983,7 @@ int main(int argc, char** argv) {
            double lp = 0;
            trs += actions.size();
         }
+        
         auto t_end = chrono::high_resolution_clock::now();
         out.close();
         double err = (trs - right) / trs;
@@ -1000,6 +1014,5 @@ int main(int argc, char** argv) {
         }
 
        cerr<<"F1score: "<<newfmeasure<<"\n";
-    
   }
 }
