@@ -2,7 +2,9 @@
 
 This implementation is based on the [cnn library](https://github.com/clab/cnn-v1) for this software to function. The reference paper is "In-Order Transition-based Constituent Parsing System"
 
-#### Building
+
+## Building
+The boost version is 1.5.4.
 
     mkdir build
     cd build
@@ -10,6 +12,8 @@ This implementation is based on the [cnn library](https://github.com/clab/cnn-v1
     make
 
 There are two implementations, Kparser and Kparser-standard. Kparser is used for standard experiments, while Kparser-standard is easy-use.
+
+## Experiments
 
 #### Data
 
@@ -34,7 +38,7 @@ Ensure the related file are linked into the current directory.
 
 The automatically generated file test.eval is the result file.
 
-We provide the trained models: [English model](https://drive.google.com/file/d/0B1VhP65vISjoWmNjN0pfTmh5Vnc/view?usp=sharing) and pretrained word embeddings [sskip.100.vectors](https://drive.google.com/open?id=0B1VhP65vISjoZ3ppTnR3YXRMd1E); [Chinese_model](https://drive.google.com/open?id=0B1VhP65vISjocW5fWmdEUVNxY3M) and pretrained word embeddings [zzgiga.sskip.80.vectors](https://drive.google.com/open?id=0B1VhP65vISjoeGJsX2syOGhLWnc)
+We provide the trained models: [English model](https://drive.google.com/file/d/0B1VhP65vISjoWmNjN0pfTmh5Vnc/view?usp=sharing) and pretrained word embeddings [sskip.100.vectors](https://drive.google.com/open?id=0B1VhP65vISjoZ3ppTnR3YXRMd1E).
 
 #### Sampling
 
@@ -43,11 +47,11 @@ We provide the trained models: [English model](https://drive.google.com/file/d/0
 
 The samples.props could be fed into following reranking components. 
 
-#### Easy Usage
+## Easy Usage
 
-Download the [model](https://drive.google.com/open?id=0B1VhP65vISjoa014Ul9pS3ZZMU0) for English.
+Download the [model](https://drive.google.com/open?id=0B1VhP65vISjoSXRHelVnSVNYSjA).
 
-    ./build/impl/Kparser-standard --cnn-mem 1700 --model_dir model -w sskip.100.vectors --train_dict train_dict < [stdin] > [stdout]
+    ./build/impl/Kparser-standard --cnn-mem 1700 --model_dir [model directory] -w sskip.100.vectors --train_dict [model directory]/train_dict < [stdin] > [stdout]
 
 The standard input should follow the fomart, Word1 POS1 Word2 POS2 ... Wordn POSn. The example is
 
