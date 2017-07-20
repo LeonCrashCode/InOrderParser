@@ -50,7 +50,7 @@ unsigned VOCAB_SIZE = 0;
 unsigned NT_SIZE = 0;
 float DROPOUT = 0.0f;
 unsigned POS_SIZE = 0;
-std::map<int,int> action2NTindex;  // pass in index of action NT(X), return index of X
+std::map<int,int> action2NTindex;  // pass in index of action PJ(X), return index of X
 bool USE_POS = false;  // in discriminative parser, incorporate POS information in token embedding
 
 using namespace cnn::expr;
@@ -67,7 +67,6 @@ void InitCommandLine(int argc, char** argv, po::variables_map* conf) {
   po::options_description opts("Configuration options");
   opts.add_options()
         ("training_data,T", po::value<string>(), "List of Transitions - Training corpus")
-        ("explicit_terminal_reduce,x", "[recommended] If set, the parser must explicitly process a REDUCE operation to complete a preterminal constituent")
         ("dev_data,d", po::value<string>(), "Development corpus")
         ("bracketing_dev_data,C", po::value<string>(), "Development bracketed corpus")
 
@@ -158,10 +157,6 @@ struct ParserBuilder {
       p_stack_guard(model->add_parameters({LSTM_INPUT_DIM})),
 
       p_cW(model->add_parameters({LSTM_INPUT_DIM, LSTM_INPUT_DIM * 2})) {
-    if (IMPLICIT_REDUCE_AFTER_SHIFT) {
-      p_ptbias = model->add_parameters({LSTM_INPUT_DIM}); // preterminal bias (used with IMPLICIT_REDUCE_AFTER_SHIFT)
-      p_ptW = model->add_parameters({LSTM_INPUT_DIM, 2*LSTM_INPUT_DIM});    // preterminal W (used with IMPLICIT_REDUCE_AFTER_SHIFT)
-    }
     if (USE_POS) {
       p_pos = model->add_lookup_parameters(POS_SIZE, {POS_DIM});
       p_p2w = model->add_parameters({LSTM_INPUT_DIM, POS_DIM});
@@ -182,7 +177,7 @@ struct ParserBuilder {
 static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsigned bsize, unsigned ssize, unsigned nopen_parens, unsigned unary) {
   bool is_shift = (a[0] == 'S' && a[1]=='H');
   bool is_reduce = (a[0] == 'R' && a[1]=='E');
-  bool is_nt = (a[0] == 'N');
+  bool is_nt = (a[0] == 'P');
   bool is_term = (a[0] == 'T');
   assert(is_shift || is_reduce || is_nt || is_term) ;
   static const unsigned MAX_OPEN_NTS = 100;
@@ -206,7 +201,7 @@ static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsig
 
   if (is_nt) {
     if(bsize == 1 && unary >= MAX_UNARY) return true;
-    if(prev_a == 'N') return true;
+    if(prev_a == 'P') return true;
     return false; 
   }
 
@@ -215,23 +210,6 @@ static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsig
     if(nopen_parens == 0) return true;
     return false;
   }
-
-/*  if (IMPLICIT_REDUCE_AFTER_SHIFT) { //default 0
-    // if a SHIFT has an implicit REDUCE, then only shift after an NT:
-    if (is_shift && prev_a != 'N') return true;
-  }
-*/
-  // be careful with top-level parens- you can only close them if you
-  // have fully processed the buffer
-/*  if (nopen_parens == 1 && bsize > 1) {
-//    if (IMPLICIT_REDUCE_AFTER_SHIFT && is_shift) return true;
-    if (is_reduce) return true;
-  }
-*/
-  // you can't reduce after an NT action
-//  if (is_reduce && prev_a == 'N') return true;
-//  if (is_nt && bsize == 1) return true;
-//  if (is_reduce && ssize < 3) return true;
 
   // TODO should we control the depth of the parse in some way? i.e., as long as there
   // are items in the buffer, we can do an NT operation, which could cause trouble
@@ -279,11 +257,6 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     Expression S = parameter(*hg, p_S);
     Expression B = parameter(*hg, p_B);
     Expression A = parameter(*hg, p_A);
-    Expression ptbias, ptW;
-    if (IMPLICIT_REDUCE_AFTER_SHIFT) {
-      ptbias = parameter(*hg, p_ptbias);
-      ptW = parameter(*hg, p_ptW);
-    }
     Expression p2w;
     if (USE_POS) {
       p2w = parameter(*hg, p_p2w);
@@ -467,26 +440,6 @@ if(DEBUG) {
 
       if (ac =='S' && ac2=='H') {  // SHIFT
         assert(buffer.size() > 1); // dummy symbol means > 1 (not >= 1)
-/*        if (IMPLICIT_REDUCE_AFTER_SHIFT) {
-          --nopen_parens;
-          int i = is_open_paren.size() - 1;
-          assert(is_open_paren[i] >= 0);
-          Expression nonterminal = lookup(*hg, p_ntup, is_open_paren[i]);
-          Expression terminal = buffer.back();
-          Expression c = concatenate({nonterminal, terminal});
-          Expression pt = rectify(affine_transform({ptbias, ptW, c}));
-          stack.pop_back();
-          stacki.pop_back();
-          stack_lstm.rewind_one_step();
-          buffer.pop_back();
-          bufferi.pop_back();
-          buffer_lstm->rewind_one_step();
-          is_open_paren.pop_back();
-          stack_lstm.add_input(pt);
-          stack.push_back(pt);
-          stacki.push_back(999);
-          is_open_paren.push_back(-1);
-        } else {*/
           stack.push_back(buffer.back());
           stack_lstm.add_input(buffer.back());
           stacki.push_back(bufferi.back());
@@ -494,9 +447,8 @@ if(DEBUG) {
           buffer_lstm->rewind_one_step();
           bufferi.pop_back();
           is_open_paren.push_back(-1);
-        //}
 	unary = 0;
-      } else if (ac == 'N') { // NT
+      } else if (ac == 'P') { // PJ
         ++nopen_parens;
         assert(stack.size() > 1);
         auto it = action2NTindex.find(action);
@@ -510,7 +462,7 @@ if(DEBUG) {
         is_open_paren.push_back(nt_index);
       } else if (ac == 'R'){ // REDUCE
         --nopen_parens;
-	if(prev_a == 'N') unary += 1;
+	if(prev_a == 'P') unary += 1;
 	if(prev_a == 'R') unary = 0;
         assert(stack.size() > 2); // dummy symbol means > 2 (not >= 2)
         // find what paren we are closing
@@ -643,7 +595,7 @@ void signal_callback_handler(int /* signum */) {
 }
 
 int main(int argc, char** argv) {
-  cnn::Initialize(argc, argv);//, 1989121011);
+  cnn::Initialize(argc, argv, 1989121011);
 
   cerr << "COMMAND LINE:"; 
   for (unsigned i = 0; i < static_cast<unsigned>(argc); ++i) cerr << ' ' << argv[i];
@@ -653,7 +605,6 @@ int main(int argc, char** argv) {
   po::variables_map conf;
   InitCommandLine(argc, argv, &conf);
   DEBUG = conf.count("debug");
-  IMPLICIT_REDUCE_AFTER_SHIFT = conf.count("explicit_terminal_reduce") == 0;
   USE_POS = conf.count("use_pos_tags");
   if (conf.count("dropout"))
     DROPOUT = conf["dropout"].as<float>();
@@ -731,7 +682,7 @@ int main(int argc, char** argv) {
 
   for (unsigned i = 0; i < adict.size(); ++i) {
     const string& a = adict.Convert(i);
-    if (a[0] != 'N') continue;
+    if (a[0] != 'P') continue;
     size_t start = a.find('(') + 1;
     size_t end = a.rfind(')');
     int nt = ntermdict.Convert(a.substr(start, end - start));
@@ -833,9 +784,14 @@ int main(int argc, char** argv) {
            }
            ComputationGraph hg;
            vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,vector<int>(),&right,true);
-           int ti = 0;
+           unsigned ti = 0;
            for (auto a : pred) {
-		out << adict.Convert(a) << endl;
+                out << adict.Convert(a);
+                if(adict.Convert(a) == "SHIFT"){
+                        out<<" " << posdict.Convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
+                        ti++;
+                }
+                out<<endl;
            }
            out << endl;
            double lp = 0;
@@ -845,21 +801,16 @@ int main(int argc, char** argv) {
         out.close();
         double err = (trs - right) / trs;
 
-	std::string command_1="python mid2tree.py dev.act " + conf["dev_data"].as<string>() + " > dev.eval" ;
+	std::string command_1="python mid2tree.py dev.act > dev.eval" ;
 	const char* cmd_1=command_1.c_str();
 	cerr<<system(cmd_1)<<"\n";
 
-        //parser::EvalBResults res = parser::Evaluate("foo", pfx);
-	std::string command="python remove_dev_unk.py "+ corpus.devdata +" dev.eval > evaluable.txt";
-	const char* cmd=command.c_str();
-	system(cmd);
-
-        std::string command2="EVALB/evalb -p EVALB/COLLINS.prm "+corpus.devdata+" evaluable.txt > evalbout.txt";
+        std::string command2="EVALB/evalb -p EVALB/COLLINS.prm "+corpus.devdata+" dev.eval > dev.evalout";
         const char* cmd2=command2.c_str();
 
         system(cmd2);
         
-        std::ifstream evalfile("evalbout.txt");
+        std::ifstream evalfile("dev.evalout");
         std::string lineS;
         std::string brackstr="Bracketing FMeasure";
         double newfmeasure=0.0;

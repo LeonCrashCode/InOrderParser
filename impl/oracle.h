@@ -33,8 +33,8 @@ struct Oracle {
   static void ReadSentenceView(const std::string& line, cnn::Dict* dict, std::vector<int>* sent);
 };
 
-// oracle that predicts nonterminal symbols with a NT(X) action
-// the action NT(X) effectively introduces an "(X" on the stack
+// oracle that predicts nonterminal symbols with a PJ(X) action
+// the action PJ(X) effectively introduces an "(X" on the stack
 // # (S (NP ...
 // raw tokens
 // tokens with OOVs replaced

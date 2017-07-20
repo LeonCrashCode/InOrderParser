@@ -1,14 +1,15 @@
 import sys
 
-def tree(acts, sents):
+def tree(acts):
 	btree = []
 	openidx = []
 	wid = 0
 	for act in acts:
 		if act[0] == 'S':
-			btree.append("(XX "+sents[wid]+")")
+			tmp = act.split()
+			btree.append("("+tmp[1]+" "+tmp[2]+")")
 			wid += 1
-		elif act[0] == 'N':
+		elif act[0] == 'P':
 			btree.insert(-1,"("+act[3:-1])
 			openidx.append(len(btree)-2)
 		else:
@@ -29,17 +30,5 @@ if __name__ == "__main__":
 		else:
 			action.append(line)
 
-	surfaces = []
-	cnt = 0
-	for line in open(sys.argv[2]):
-		line = line.strip()
-		cnt += 1
-		if cnt == 3:
-			surfaces.append(line.split())
-		if line == "":
-			cnt = 0
-
-	assert len(actions) == len(surfaces)
-
-	for i in range(len(surfaces)):	
-		tree(actions[i], surfaces[i]);
+	for i in range(len(actions)):	
+		tree(actions[i]);

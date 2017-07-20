@@ -93,10 +93,10 @@ void KOracle::load_oracle(const string& file, bool is_training) {
       assert(line.find(' ') == string::npos);
       if (line == kREDUCE) {
         cur_acts.push_back(kREDUCE_INT);
-      } else if (line.find("NT(") == 0) {
+      } else if (line.find("PJ(") == 0) {
         // Convert NT
         nd->Convert(line.substr(3, line.size() - 4));
-        // NT(X) is put into the actions list as NT(X)
+        // PJ(X) is put into the actions list as PJ(X)
         cur_acts.push_back(ad->Convert(line));
       } else if (line == kSHIFT) {
         cur_acts.push_back(kSHIFT_INT);

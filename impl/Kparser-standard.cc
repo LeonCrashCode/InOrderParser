@@ -48,7 +48,7 @@ unsigned VOCAB_SIZE = 0;
 unsigned NT_SIZE = 0;
 unsigned POS_SIZE = 0;
 
-std::map<int,int> action2NTindex;  // pass in index of action NT(X), return index of X
+std::map<int,int> action2NTindex;  // pass in index of action PJ(X), return index of X
 std::map<std::string,int> train_dict;
 using namespace cnn::expr;
 using namespace cnn;
@@ -146,7 +146,7 @@ struct ParserBuilder {
 static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsigned bsize, unsigned ssize, unsigned nopen_parens, unsigned unary) {
   bool is_shift = (a[0] == 'S' && a[1]=='H');
   bool is_reduce = (a[0] == 'R' && a[1]=='E');
-  bool is_nt = (a[0] == 'N');
+  bool is_nt = (a[0] == 'P');
   bool is_term = (a[0] == 'T');
   assert(is_shift || is_reduce || is_nt || is_term) ;
   static const unsigned MAX_OPEN_NTS = 100;
@@ -170,7 +170,7 @@ static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsig
 
   if (is_nt) {
     if(bsize == 1 && unary >= MAX_UNARY) return true;
-    if(prev_a == 'N') return true;
+    if(prev_a == 'P') return true;
     return false; 
   }
 
@@ -374,7 +374,7 @@ if(DEBUG) {
           bufferi.pop_back();
           is_open_paren.push_back(-1);
 	unary = 0;
-      } else if (ac == 'N') { // NT
+      } else if (ac == 'P') { // PJ
         ++nopen_parens;
         assert(stack.size() > 1);
         auto it = action2NTindex.find(action);
@@ -388,7 +388,7 @@ if(DEBUG) {
         is_open_paren.push_back(nt_index);
       } else if (ac == 'R'){ // REDUCE
         --nopen_parens;
-	if(prev_a == 'N') unary += 1;
+	if(prev_a == 'P') unary += 1;
 	if(prev_a == 'R') unary = 0;
         assert(stack.size() > 2); // dummy symbol means > 2 (not >= 2)
         // find what paren we are closing
@@ -654,7 +654,7 @@ int main(int argc, char** argv) {
 
   for (unsigned i = 0; i < adict.size(); ++i) {
     const string& a = adict.Convert(i);
-    if (a[0] != 'N') continue;
+    if (a[0] != 'P') continue;
     size_t start = a.find('(') + 1;
     size_t end = a.rfind(')');
     int nt = ntermdict.Convert(a.substr(start, end - start));
