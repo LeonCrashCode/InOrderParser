@@ -1,6 +1,6 @@
 import sys
 import get_dictionary
-
+import types
 # tokens is a list of tokens, so no need to split it again
 def unkify(tokens, words_dict):
     final = []
@@ -159,6 +159,39 @@ def get_actions(line):
     assert i == max_idx  
     return output_actions
 
+def construct(actions, trees):
+    while len(actions) > 0:
+	act = actions[0]
+	actions = actions[1:]
+	if act[0] == 'N':
+		tree = [act]
+		actions, tree = construct(actions,tree)
+		trees.append(tree)
+	elif act[0] == 'S':
+		trees.append(act)
+	elif act[0] == 'R':
+		break;
+	else:
+		assert False
+    return actions, trees
+
+def get_actions2(trees, actions):
+    if type(trees[1]) == types.ListType:
+	actions = get_actions2(trees[1], actions)
+    else:
+	actions.append(trees[1])
+
+    assert type(trees[0]) == types.StringType
+    actions.append("PJ"+trees[0][2:])
+    
+    for item in trees[2:]:
+	if type(item) == types.ListType:
+		actions = get_actions2(item, actions)
+	else:
+		actions.append(item)
+    actions.append("REDUCE")
+    return actions	
+
 def main():
     if len(sys.argv) != 3:
         raise NotImplementedError('Program only takes two arguments:  train file and dev file (for vocabulary mapping purposes)')
@@ -187,9 +220,13 @@ def main():
         unkified = unkify(tokens, words_list)    
         print ' '.join(unkified)
         output_actions = get_actions(line)
-        for action in output_actions:
+	_, trees = construct(output_actions, [])
+
+        output_actions2 = get_actions2(trees[0], [])
+	for action in output_actions2:
             print action
-        print ''
+        print 'TERM'
+	print ''
     
 
 if __name__ == "__main__":

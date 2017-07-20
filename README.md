@@ -12,18 +12,12 @@ This implementation is based on the [cnn library](https://github.com/clab/cnn-v1
 There are two implementations, Kparser and Kparser-standard. Kparser is used for standard experiments, while Kparser-standard is easy-use.
 
 #### Data
-We borrow the code [get_oracle.py](https://github.com/clab/rnng/blob/master/get_oracle.py) to get top-down oracle
- 
-    ./get_oracle.py [training data in bracketed format] [training data in bracketed format] > [training top-down oracle]
-    ./get_oracle.py [training data in bracketed format] [development data in bracketed format] > [development top-down oracle]   
-    ./get_oracle.py [training data in bracketed format] [test data in bracketed format] > [test top-down oracle]
 
-, and then compile pre2mid.cc to get pre2mid to convert them into in-order oracle
+You could use the scripts to convert the format of training, development and test data, respectively.
 
-    g++ pre2mid.cc -o pre2mid
-    ./pre2mid [training top-down oracle] > [training oracle]
-    ./pre2mid [development top-down oracle] > [development oracle]
-    ./pre2mid [test top-down oracle] > [test oracle]
+    ./get_oracle.py [training data in bracketed format] [training data in bracketed format] > [training oracle]
+    ./get_oracle.py [training data in bracketed format] [development data in bracketed format] > [development oracle]   
+    ./get_oracle.py [training data in bracketed format] [test data in bracketed format] > [test oracle]
 
 If you require the related data, contact us.
 
