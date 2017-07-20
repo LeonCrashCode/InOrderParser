@@ -3,8 +3,7 @@
 #include <cassert>
 #include <fstream>
 
-#include "cnn/dict.h"
-#include "impl/compressed-fstream.h"
+#include "dynet/dict.h"
 
 using namespace std;
 
@@ -21,7 +20,7 @@ inline bool is_not_ws(char x) {
   return (x != ' ' && x != '\t');
 }
 
-void Oracle::ReadSentenceView(const std::string& line, cnn::Dict* dict, vector<int>* sent) {
+void Oracle::ReadSentenceView(const std::string& line, dynet::Dict* dict, vector<int>* sent) {
   unsigned cur = 0;
   while(cur < line.size()) {
     while(cur < line.size() && is_ws(line[cur])) { ++cur; }
@@ -29,7 +28,7 @@ void Oracle::ReadSentenceView(const std::string& line, cnn::Dict* dict, vector<i
     while(cur < line.size() && is_not_ws(line[cur])) { ++cur; }
     unsigned end = cur;
     if (end > start) {
-      unsigned x = dict->Convert(line.substr(start, end - start));
+      unsigned x = dict->convert(line.substr(start, end - start));
       sent->push_back(x);
     }
   }
@@ -42,14 +41,14 @@ void KOracle::load_bdata(const string& file) {
 
 void KOracle::load_oracle(const string& file, bool is_training) {
   cerr << "Loading top-down oracle from " << file << " [" << (is_training ? "training" : "non-training") << "] ...\n";
-  cnn::compressed_ifstream in(file.c_str());
+  ifstream in(file.c_str());
   assert(in);
   const string kREDUCE = "REDUCE";
   const string kSHIFT = "SHIFT";
   const string kTERM = "TERM";
-  const int kREDUCE_INT = ad->Convert("REDUCE");
-  const int kSHIFT_INT = ad->Convert("SHIFT");
-  const int kTERM_INT = ad->Convert("TERM");
+  const int kREDUCE_INT = ad->convert("REDUCE");
+  const int kSHIFT_INT = ad->convert("SHIFT");
+  const int kTERM_INT = ad->convert("TERM");
   int lc = 0;
   string line;
   vector<int> cur_acts;
@@ -94,10 +93,10 @@ void KOracle::load_oracle(const string& file, bool is_training) {
       if (line == kREDUCE) {
         cur_acts.push_back(kREDUCE_INT);
       } else if (line.find("PJ(") == 0) {
-        // Convert NT
-        nd->Convert(line.substr(3, line.size() - 4));
+        // convert NT
+        nd->convert(line.substr(3, line.size() - 4));
         // PJ(X) is put into the actions list as PJ(X)
-        cur_acts.push_back(ad->Convert(line));
+        cur_acts.push_back(ad->convert(line));
       } else if (line == kSHIFT) {
         cur_acts.push_back(kSHIFT_INT);
         termc++;

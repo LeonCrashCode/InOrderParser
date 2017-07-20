@@ -5,12 +5,12 @@
 #include <vector>
 #include <string>
 
-namespace cnn { struct Dict; }
+namespace dynet { struct Dict; }
 
 namespace parser {
 
 void ReadEmbeddings_word2vec(const std::string& fname,
-        cnn::Dict* dict,
+        dynet::Dict* dict,
         std::unordered_map<unsigned, std::vector<float>>* pretrained);
 
 } // namespace parser

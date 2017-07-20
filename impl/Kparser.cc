@@ -12,94 +12,41 @@
 #include <unistd.h>
 #include <signal.h>
 
-#include <boost/archive/text_oarchive.hpp>
-#include <boost/archive/text_iarchive.hpp>
-#include <boost/program_options.hpp>
-
-#include "cnn/training.h"
-#include "cnn/cnn.h"
-#include "cnn/expr.h"
-#include "cnn/nodes.h"
-#include "cnn/lstm.h"
-#include "cnn/rnn.h"
-#include "cnn/dict.h"
-#include "cnn/cfsm-builder.h"
+#include "dynet/training.h"
+#include "dynet/dynet.h"
+#include "dynet/expr.h"
+#include "dynet/nodes.h"
+#include "dynet/lstm.h"
+#include "dynet/rnn.h"
+#include "dynet/dict.h"
+#include "dynet/cfsm-builder.h"
+#include "dynet/io.h"
 
 #include "impl/oracle.h"
 #include "impl/pretrained.h"
-#include "impl/compressed-fstream.h"
-#include "impl/eval.h"
+
+#include "impl/cl-args.h"
 
 // dictionaries
-cnn::Dict termdict, ntermdict, adict, posdict;
+dynet::Dict termdict, ntermdict, adict, posdict;
 bool DEBUG;
 volatile bool requested_stop = false;
-unsigned IMPLICIT_REDUCE_AFTER_SHIFT = 0;
-unsigned LAYERS = 2;
-unsigned INPUT_DIM = 40;
-unsigned HIDDEN_DIM = 60;
-unsigned ACTION_DIM = 36;
-unsigned PRETRAINED_DIM = 50;
-unsigned LSTM_INPUT_DIM = 60;
-unsigned POS_DIM = 10;
 
-float ALPHA = 1.f;
-unsigned N_SAMPLES = 1;
 unsigned ACTION_SIZE = 0;
 unsigned VOCAB_SIZE = 0;
 unsigned NT_SIZE = 0;
-float DROPOUT = 0.0f;
 unsigned POS_SIZE = 0;
+
 std::map<int,int> action2NTindex;  // pass in index of action PJ(X), return index of X
-bool USE_POS = false;  // in discriminative parser, incorporate POS information in token embedding
 
-using namespace cnn::expr;
-using namespace cnn;
+Params params;
+
+using namespace dynet;
 using namespace std;
-namespace po = boost::program_options;
-
 
 vector<unsigned> possible_actions;
 unordered_map<unsigned, vector<float>> pretrained;
 vector<bool> singletons; // used during training
-
-void InitCommandLine(int argc, char** argv, po::variables_map* conf) {
-  po::options_description opts("Configuration options");
-  opts.add_options()
-        ("training_data,T", po::value<string>(), "List of Transitions - Training corpus")
-        ("dev_data,d", po::value<string>(), "Development corpus")
-        ("bracketing_dev_data,C", po::value<string>(), "Development bracketed corpus")
-
-        ("test_data,p", po::value<string>(), "Test corpus")
-        ("dropout,D", po::value<float>(), "Dropout rate")
-        ("samples,s", po::value<unsigned>(), "Sample N trees for each test sentence instead of greedy max decoding")
-        ("alpha,a", po::value<float>(), "Flatten (0 < alpha < 1) or sharpen (1 < alpha) sampling distribution")
-        ("model,m", po::value<string>(), "Load saved model from this file")
-        ("use_pos_tags,P", "make POS tags visible to parser")
-        ("layers", po::value<unsigned>()->default_value(2), "number of LSTM layers")
-        ("action_dim", po::value<unsigned>()->default_value(16), "action embedding size")
-        ("pos_dim", po::value<unsigned>()->default_value(12), "POS dimension")
-        ("input_dim", po::value<unsigned>()->default_value(32), "input embedding size")
-        ("hidden_dim", po::value<unsigned>()->default_value(64), "hidden dimension")
-        ("pretrained_dim", po::value<unsigned>()->default_value(50), "pretrained input dimension")
-        ("lstm_input_dim", po::value<unsigned>()->default_value(60), "LSTM input dimension")
-        ("train,t", "Should training be run?")
-        ("words,w", po::value<string>(), "Pretrained word embeddings")
-        ("beam_size,b", po::value<unsigned>()->default_value(1), "beam size")
-	("debug","debug")
-        ("help,h", "Help");
-  po::options_description dcmdline_options;
-  dcmdline_options.add(opts);
-  po::store(parse_command_line(argc, argv, dcmdline_options), *conf);
-  if (conf->count("help")) {
-    cerr << dcmdline_options << endl;
-    exit(1);
-  }
-  if (conf->count("training_data") == 0) {
-    cerr << "Please specify --traing_data (-T): this is required to determine the vocabulary mapping, even if the parser is used in prediction mode.\n";
-    exit(1);
-  }
-}
 
 struct ParserBuilder {
   LSTMBuilder stack_lstm; // (layers, input, hidden, trainer)
@@ -107,69 +54,66 @@ struct ParserBuilder {
   LSTMBuilder action_lstm;
   LSTMBuilder const_lstm_fwd;
   LSTMBuilder const_lstm_rev;
-  LookupParameters* p_w; // word embeddings
-  LookupParameters* p_t; // pretrained word embeddings (not updated)
-  LookupParameters* p_nt; // nonterminal embeddings
-  LookupParameters* p_ntup; // nonterminal embeddings when used in a composed representation
-  LookupParameters* p_a; // input action embeddings
-  LookupParameters* p_pos; // pos embeddings (optional)
-  Parameters* p_p2w;  // pos2word mapping (optional)
-  Parameters* p_ptbias; // preterminal bias (used with IMPLICIT_REDUCE_AFTER_SHIFT)
-  Parameters* p_ptW;    // preterminal W (used with IMPLICIT_REDUCE_AFTER_SHIFT)
-  Parameters* p_pbias; // parser state bias
-  Parameters* p_A; // action lstm to parser state
-  Parameters* p_B; // buffer lstm to parser state
-  Parameters* p_S; // stack lstm to parser state
-  Parameters* p_w2l; // word to LSTM input
-  Parameters* p_t2l; // pretrained word embeddings to LSTM input
-  Parameters* p_ib; // LSTM input bias
-  Parameters* p_cbias; // composition function bias
-  Parameters* p_p2a;   // parser state to action
-  Parameters* p_action_start;  // action bias
-  Parameters* p_abias;  // action bias
-  Parameters* p_buffer_guard;  // end of buffer
-  Parameters* p_stack_guard;  // end of stack
+  LookupParameter p_w; // word embeddings
+  LookupParameter p_t; // pretrained word embeddings (not updated)
+  LookupParameter p_nt; // nonterminal embeddings
+  LookupParameter p_ntup; // nonterminal embeddings when used in a composed representation
+  LookupParameter p_a; // input action embeddings
+  LookupParameter p_pos; // pos embeddings (optional)
+  Parameter p_p2w;  // pos2word mapping (optional)
+  Parameter p_ptbias; // preterminal bias (used with IMPLICIT_REDUCE_AFTER_SHIFT)
+  Parameter p_ptW;    // preterminal W (used with IMPLICIT_REDUCE_AFTER_SHIFT)
+  Parameter p_pbias; // parser state bias
+  Parameter p_A; // action lstm to parser state
+  Parameter p_B; // buffer lstm to parser state
+  Parameter p_S; // stack lstm to parser state
+  Parameter p_w2l; // word to LSTM input
+  Parameter p_t2l; // pretrained word embeddings to LSTM input
+  Parameter p_ib; // LSTM input bias
+  Parameter p_cbias; // composition function bias
+  Parameter p_p2a;   // parser state to action
+  Parameter p_action_start;  // action bias
+  Parameter p_abias;  // action bias
+  Parameter p_buffer_guard;  // end of buffer
+  Parameter p_stack_guard;  // end of stack
 
-  Parameters* p_cW;
+  Parameter p_cW;
 
   explicit ParserBuilder(Model* model, const unordered_map<unsigned, vector<float>>& pretrained) :
-      stack_lstm(LAYERS, LSTM_INPUT_DIM, HIDDEN_DIM, model),
-      action_lstm(LAYERS, ACTION_DIM, HIDDEN_DIM, model),
-      const_lstm_fwd(LAYERS, LSTM_INPUT_DIM, LSTM_INPUT_DIM, model), // used to compose children of a node into a representation of the node
-      const_lstm_rev(LAYERS, LSTM_INPUT_DIM, LSTM_INPUT_DIM, model), // used to compose children of a node into a representation of the node
-      p_w(model->add_lookup_parameters(VOCAB_SIZE, {INPUT_DIM})),
-      p_t(model->add_lookup_parameters(VOCAB_SIZE, {INPUT_DIM})),
-      p_nt(model->add_lookup_parameters(NT_SIZE, {LSTM_INPUT_DIM})),
-      p_ntup(model->add_lookup_parameters(NT_SIZE, {LSTM_INPUT_DIM})),
-      p_a(model->add_lookup_parameters(ACTION_SIZE, {ACTION_DIM})),
-      p_pbias(model->add_parameters({HIDDEN_DIM})),
-      p_A(model->add_parameters({HIDDEN_DIM, HIDDEN_DIM})),
-      p_B(model->add_parameters({HIDDEN_DIM, HIDDEN_DIM})),
-      p_S(model->add_parameters({HIDDEN_DIM, HIDDEN_DIM})),
-      p_w2l(model->add_parameters({LSTM_INPUT_DIM, INPUT_DIM})),
-      p_ib(model->add_parameters({LSTM_INPUT_DIM})),
-      p_cbias(model->add_parameters({LSTM_INPUT_DIM})),
-      p_p2a(model->add_parameters({ACTION_SIZE, HIDDEN_DIM})),
-      p_action_start(model->add_parameters({ACTION_DIM})),
+      stack_lstm(params.layers, params.lstm_input_dim, params.hidden_dim, *model),
+      action_lstm(params.layers, params.action_dim, params.hidden_dim, *model),
+      const_lstm_fwd(params.layers, params.lstm_input_dim, params.lstm_input_dim, *model), // used to compose children of a node into a representation of the node
+      const_lstm_rev(params.layers, params.lstm_input_dim, params.lstm_input_dim, *model), // used to compose children of a node into a representation of the node
+      p_w(model->add_lookup_parameters(VOCAB_SIZE, {params.input_dim})),
+      p_t(model->add_lookup_parameters(VOCAB_SIZE, {params.input_dim})),
+      p_nt(model->add_lookup_parameters(NT_SIZE, {params.lstm_input_dim})),
+      p_ntup(model->add_lookup_parameters(NT_SIZE, {params.lstm_input_dim})),
+      p_a(model->add_lookup_parameters(ACTION_SIZE, {params.action_dim})),
+      p_pbias(model->add_parameters({params.hidden_dim})),
+      p_A(model->add_parameters({params.hidden_dim, params.hidden_dim})),
+      p_B(model->add_parameters({params.hidden_dim, params.hidden_dim})),
+      p_S(model->add_parameters({params.hidden_dim, params.hidden_dim})),
+      p_w2l(model->add_parameters({params.lstm_input_dim, params.input_dim})),
+      p_ib(model->add_parameters({params.lstm_input_dim})),
+      p_cbias(model->add_parameters({params.lstm_input_dim})),
+      p_p2a(model->add_parameters({ACTION_SIZE, params.hidden_dim})),
+      p_action_start(model->add_parameters({params.action_dim})),
       p_abias(model->add_parameters({ACTION_SIZE})),
 
-      p_buffer_guard(model->add_parameters({LSTM_INPUT_DIM})),
-      p_stack_guard(model->add_parameters({LSTM_INPUT_DIM})),
+      p_buffer_guard(model->add_parameters({params.lstm_input_dim})),
+      p_stack_guard(model->add_parameters({params.lstm_input_dim})),
 
-      p_cW(model->add_parameters({LSTM_INPUT_DIM, LSTM_INPUT_DIM * 2})) {
-    if (USE_POS) {
-      p_pos = model->add_lookup_parameters(POS_SIZE, {POS_DIM});
-      p_p2w = model->add_parameters({LSTM_INPUT_DIM, POS_DIM});
+      p_cW(model->add_parameters({params.lstm_input_dim, params.lstm_input_dim * 2})) {
+    if (params.use_pos_tags) {
+      p_pos = model->add_lookup_parameters(POS_SIZE, {params.pos_dim});
+      p_p2w = model->add_parameters({params.lstm_input_dim, params.pos_dim});
     }
-    buffer_lstm = new LSTMBuilder(LAYERS, LSTM_INPUT_DIM, HIDDEN_DIM, model);
+    buffer_lstm = new LSTMBuilder(params.layers, params.lstm_input_dim, params.hidden_dim, *model);
     if (pretrained.size() > 0) {
-      p_t = model->add_lookup_parameters(VOCAB_SIZE, {PRETRAINED_DIM});
+      p_t = model->add_lookup_parameters(VOCAB_SIZE, {params.pretrained_dim});
       for (auto it : pretrained)
-        p_t->Initialize(it.first, it.second);
-      p_t2l = model->add_parameters({LSTM_INPUT_DIM, PRETRAINED_DIM});
-    } else {
-      p_t = nullptr;
-      p_t2l = nullptr;
+        p_t.initialize(it.first, it.second);
+      p_t2l = model->add_parameters({params.lstm_input_dim, params.pretrained_dim});
     }
   }
 
@@ -221,16 +165,16 @@ static bool IsActionForbidden_Discriminative(const string& a, char prev_a, unsig
 // this lets us use pretrained embeddings, when available, for words that were OOV in the
 // parser training data
 // set sample=true to sample rather than max
-vector<unsigned> log_prob_parser(ComputationGraph* hg,
+Expression log_prob_parser(ComputationGraph* hg,
                      const parser::Sentence& sent,
                      const vector<int>& correct_actions,
                      double *right,
+		     vector<unsigned> *results,
                      bool is_evaluation,
                      bool sample = false) {
 if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
-    vector<unsigned> results;
     const bool build_training_graph = correct_actions.size() > 0;
-    bool apply_dropout = (DROPOUT && !is_evaluation);
+    bool apply_dropout = (params.dropout && !is_evaluation);
     stack_lstm.new_graph(*hg);
     action_lstm.new_graph(*hg);
     const_lstm_fwd.new_graph(*hg);
@@ -240,11 +184,11 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     buffer_lstm->start_new_sequence();
     action_lstm.start_new_sequence();
     if (apply_dropout) {
-      stack_lstm.set_dropout(DROPOUT);
-      action_lstm.set_dropout(DROPOUT);
-      buffer_lstm->set_dropout(DROPOUT);
-      const_lstm_fwd.set_dropout(DROPOUT);
-      const_lstm_rev.set_dropout(DROPOUT);
+      stack_lstm.set_dropout(params.dropout);
+      action_lstm.set_dropout(params.dropout);
+      buffer_lstm->set_dropout(params.dropout);
+      const_lstm_fwd.set_dropout(params.dropout);
+      const_lstm_rev.set_dropout(params.dropout);
     } else {
       stack_lstm.disable_dropout();
       action_lstm.disable_dropout();
@@ -258,7 +202,7 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     Expression B = parameter(*hg, p_B);
     Expression A = parameter(*hg, p_A);
     Expression p2w;
-    if (USE_POS) {
+    if (params.use_pos_tags) {
       p2w = parameter(*hg, p_p2w);
     }
 
@@ -266,7 +210,7 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     Expression cbias = parameter(*hg, p_cbias);
     Expression w2l = parameter(*hg, p_w2l);
     Expression t2l;
-    if (p_t2l)
+    if (pretrained.size() > 0)
       t2l = parameter(*hg, p_t2l);
     Expression p2a = parameter(*hg, p_p2a);
     Expression abias = parameter(*hg, p_abias);
@@ -286,12 +230,12 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
           wordid = sent.unk[i];
         Expression w = lookup(*hg, p_w, wordid);
         vector<Expression> args = {ib, w2l, w}; // learn embeddings
-        if (p_t && pretrained.count(sent.lc[i])) {  // include fixed pretrained vectors?
+        if (pretrained.size()>0 && pretrained.count(sent.lc[i])) {  // include fixed pretrained vectors?
           Expression t = const_lookup(*hg, p_t, sent.lc[i]);
           args.push_back(t2l);
           args.push_back(t);
         }
-        if (USE_POS) {
+        if (params.use_pos_tags) {
           args.push_back(p2w);
           args.push_back(lookup(*hg, p_pos, sent.pos[i]));
         }
@@ -329,14 +273,14 @@ if(DEBUG) cerr<< "action_count " << action_count <<"\n";
       current_valid_actions.clear();
 if(DEBUG) cerr<< "unary: " << unary << "nopen_parens: "<<nopen_parens<<"\n";
       for (auto a: possible_actions) {
-        if (IsActionForbidden_Discriminative(adict.Convert(a), prev_a, buffer.size(), stack.size(), nopen_parens, unary))
+        if (IsActionForbidden_Discriminative(adict.convert(a), prev_a, buffer.size(), stack.size(), nopen_parens, unary))
           continue;
         current_valid_actions.push_back(a);
       }
 if(DEBUG){
 	cerr <<"current_valid_actions: "<<current_valid_actions.size()<<" :";
 	for(unsigned i = 0; i < current_valid_actions.size(); i ++){
-		cerr<<adict.Convert(current_valid_actions[i])<<" ";
+		cerr<<adict.convert(current_valid_actions[i])<<" ";
 	}
 	cerr <<"\n";
 
@@ -358,19 +302,19 @@ if(DEBUG){
       Expression buffer_summary = buffer_lstm->back();
 
       if (apply_dropout) {
-        stack_summary = dropout(stack_summary, DROPOUT);
-        action_summary = dropout(action_summary, DROPOUT);
-        buffer_summary = dropout(buffer_summary, DROPOUT);
+        stack_summary = dropout(stack_summary, params.dropout);
+        action_summary = dropout(action_summary, params.dropout);
+        buffer_summary = dropout(buffer_summary, params.dropout);
       }
       Expression p_t = affine_transform({pbias, S, stack_summary, B, buffer_summary, A, action_summary});
       Expression nlp_t = rectify(p_t);
       //if (build_training_graph) nlp_t = dropout(nlp_t, 0.4);
       // r_t = abias + p2a * nlp
       Expression r_t = affine_transform({abias, p2a, nlp_t});
-      if (sample && ALPHA != 1.0f) r_t = r_t * ALPHA;
+      if (sample && params.alpha != 1.0f) r_t = r_t * params.alpha;
       // adist = log_softmax(r_t, current_valid_actions)
       Expression adiste = log_softmax(r_t, current_valid_actions);
-      vector<float> adist = as_vector(hg->incremental_forward());
+      vector<float> adist = as_vector(hg->incremental_forward(adiste));
       double best_score = adist[current_valid_actions[0]];
       unsigned model_action = current_valid_actions[0];
       if (sample) {
@@ -400,26 +344,26 @@ if(DEBUG){
         action = correct_actions[action_count];
         if (model_action == action) { (*right)++; }
       } else {
-        //cerr << "Chosen action: " << adict.Convert(action) << endl;
+        //cerr << "Chosen action: " << adict.convert(action) << endl;
       }
-      //cerr << "prob ="; for (unsigned i = 0; i < adist.size(); ++i) { cerr << ' ' << adict.Convert(i) << ':' << adist[i]; }
+      //cerr << "prob ="; for (unsigned i = 0; i < adist.size(); ++i) { cerr << ' ' << adict.convert(i) << ':' << adist[i]; }
       //cerr << endl;
       ++action_count;
       log_probs.push_back(pick(adiste, action));
-      results.push_back(action);
+      if(results) results->push_back(action);
 
       // add current action to action LSTM
       Expression actione = lookup(*hg, p_a, action);
       action_lstm.add_input(actione);
 
       // do action
-      const string& actionString=adict.Convert(action);
+      const string& actionString=adict.convert(action);
       //cerr << "ACT: " << actionString << endl;
       const char ac = actionString[0];
       const char ac2 = actionString[1];
 if(DEBUG){
       
-      cerr << "MODEL_ACT: " << adict.Convert(model_action)<<" ";
+      cerr << "MODEL_ACT: " << adict.convert(model_action)<<" ";
       cerr <<"GOLD_ACT: " << actionString<<"\n";
 }
 
@@ -509,8 +453,8 @@ if(DEBUG) cerr << "  number of children to reduce: " << nchildren << endl;
         Expression cfwd = const_lstm_fwd.back();
         Expression crev = const_lstm_rev.back();
         if (apply_dropout) {
-          cfwd = dropout(cfwd, DROPOUT);
-          crev = dropout(crev, DROPOUT);
+          cfwd = dropout(cfwd, params.dropout);
+          crev = dropout(crev, params.dropout);
         }
         Expression c = concatenate({cfwd, crev});
         Expression composed = rectify(affine_transform({cbias, cW, c}));
@@ -533,7 +477,7 @@ if(DEBUG) cerr << "  number of children to reduce: " << nchildren << endl;
     assert(bufferi.size() == 1);
     Expression tot_neglogprob = -sum(log_probs);
     assert(tot_neglogprob.pg != nullptr);
-    return results;
+    return tot_neglogprob;
   }
 
 
@@ -595,72 +539,47 @@ void signal_callback_handler(int /* signum */) {
 }
 
 int main(int argc, char** argv) {
-  cnn::Initialize(argc, argv, 1989121011);
-
-  cerr << "COMMAND LINE:"; 
+  DynetParams dynet_params = extract_dynet_params(argc, argv);
+  dynet_params.random_seed = 1989121013;
+  dynet::initialize(dynet_params);
+  cerr << "COMMAND:";
   for (unsigned i = 0; i < static_cast<unsigned>(argc); ++i) cerr << ' ' << argv[i];
   cerr << endl;
   unsigned status_every_i_iterations = 100;
 
-  po::variables_map conf;
-  InitCommandLine(argc, argv, &conf);
-  DEBUG = conf.count("debug");
-  USE_POS = conf.count("use_pos_tags");
-  if (conf.count("dropout"))
-    DROPOUT = conf["dropout"].as<float>();
-  LAYERS = conf["layers"].as<unsigned>();
-  INPUT_DIM = conf["input_dim"].as<unsigned>();
-  PRETRAINED_DIM = conf["pretrained_dim"].as<unsigned>();
-  HIDDEN_DIM = conf["hidden_dim"].as<unsigned>();
-  ACTION_DIM = conf["action_dim"].as<unsigned>();
-  LSTM_INPUT_DIM = conf["lstm_input_dim"].as<unsigned>();
-  POS_DIM = conf["pos_dim"].as<unsigned>();
-  if (conf.count("train") && conf.count("dev_data") == 0) {
-    cerr << "You specified --train but did not specify --dev_data FILE\n";
-    return 1;
-  }
-  if (conf.count("alpha")) {
-    ALPHA = conf["alpha"].as<float>();
-    if (ALPHA <= 0.f) { cerr << "--alpha must be between 0 and +infty\n"; abort(); }
-  }
-  if (conf.count("samples")) {
-    N_SAMPLES = conf["samples"].as<unsigned>();
-    if (N_SAMPLES == 0) { cerr << "Please specify N>0 samples\n"; abort(); }
-  }
+  get_args(argc, argv, params);
   
   ostringstream os;
   os << "ntparse"
-     << (USE_POS ? "_pos" : "")
-     << '_' << IMPLICIT_REDUCE_AFTER_SHIFT
-     << '_' << LAYERS
-     << '_' << INPUT_DIM
-     << '_' << HIDDEN_DIM
-     << '_' << ACTION_DIM
-     << '_' << LSTM_INPUT_DIM
+     << (params.use_pos_tags ? "_pos" : "")
+     << '_' << params.layers
+     << '_' << params.input_dim
+     << '_' << params.hidden_dim
+     << '_' << params.action_dim
+     << '_' << params.lstm_input_dim
      << "-pid" << getpid() << ".params";
   const string fname = os.str();
   cerr << "PARAMETER FILE: " << fname << endl;
-  bool softlinkCreated = false;
 
   Model model;
 
   parser::KOracle corpus(&termdict, &adict, &posdict, &ntermdict);
   parser::KOracle dev_corpus(&termdict, &adict, &posdict, &ntermdict);
   parser::KOracle test_corpus(&termdict, &adict, &posdict, &ntermdict);
-  corpus.load_oracle(conf["training_data"].as<string>(), true);	
-  corpus.load_bdata(conf["bracketing_dev_data"].as<string>());
+  corpus.load_oracle(params.training_data, true);	
+  corpus.load_bdata(params.bracketing_dev_data);
 
-  if (conf.count("words"))
-    parser::ReadEmbeddings_word2vec(conf["words"].as<string>(), &termdict, &pretrained);
+  if (params.words != "")
+    parser::ReadEmbeddings_word2vec(params.words, &termdict, &pretrained);
 
   // freeze dictionaries so we don't accidentaly load OOVs
-  termdict.Freeze();
-  termdict.SetUnk("UNK"); // we don't actually expect to use this often
+  termdict.freeze();
+  termdict.set_unk("UNK"); // we don't actually expect to use this often
      // since the Oracles are required to be "pre-UNKified", but this prevents
      // problems with UNKifying the lowercased data which needs to be loaded
-  adict.Freeze();
-  ntermdict.Freeze();
-  posdict.Freeze();
+  adict.freeze();
+  ntermdict.freeze();
+  posdict.freeze();
 
   {  // compute the singletons in the parser's training data
     unordered_map<unsigned, unsigned> counts;
@@ -671,21 +590,21 @@ int main(int argc, char** argv) {
       if (wc.second == 1) singletons[wc.first] = true;
   }
 
-  if (conf.count("dev_data")) {
+  if (params.dev_data != "") {
     cerr << "Loading validation set\n";
-    dev_corpus.load_oracle(conf["dev_data"].as<string>(), false);
+    dev_corpus.load_oracle(params.dev_data, false);
   }
-  if (conf.count("test_data")) {
+  if (params.test_data != "") {
     cerr << "Loading test set\n";
-    test_corpus.load_oracle(conf["test_data"].as<string>(), false);
+    test_corpus.load_oracle(params.test_data, false);
   }
 
   for (unsigned i = 0; i < adict.size(); ++i) {
-    const string& a = adict.Convert(i);
+    const string& a = adict.convert(i);
     if (a[0] != 'P') continue;
     size_t start = a.find('(') + 1;
     size_t end = a.rfind(')');
-    int nt = ntermdict.Convert(a.substr(start, end - start));
+    int nt = ntermdict.convert(a.substr(start, end - start));
     action2NTindex[i] = nt;
   }
 
@@ -698,19 +617,15 @@ int main(int argc, char** argv) {
     possible_actions[i] = i;
 
   ParserBuilder parser(&model, pretrained);
-  if (conf.count("model")) {
-    ifstream in(conf["model"].as<string>().c_str());
-    boost::archive::text_iarchive ia(in);
-    ia >> model;
+  if (params.model != "") {
+    TextFileLoader loader(params.model);
+    loader.populate(model);
   }
 
   //TRAINING
-  if (conf.count("train")) {
+  if (params.train) {
     signal(SIGINT, signal_callback_handler);
-    SimpleSGDTrainer sgd(&model);
-    //AdamTrainer sgd(&model);
-    //MomentumSGDTrainer sgd(&model);
-    //sgd.eta_decay = 0.08;
+    SimpleSGDTrainer sgd(model);
     sgd.eta_decay = 0.05;
     vector<unsigned> order(corpus.sents.size());
     for (unsigned i = 0; i < corpus.sents.size(); ++i)
@@ -742,13 +657,13 @@ int main(int argc, char** argv) {
            auto& sentence = corpus.sents[order[si]];
 	   const vector<int>& actions=corpus.actions[order[si]];
            ComputationGraph hg;
-           parser.log_prob_parser(&hg,sentence,actions,&right,false);
-           double lp = as_scalar(hg.incremental_forward());
+           Expression nll = parser.log_prob_parser(&hg,sentence,actions,&right,NULL,false);
+           double lp = as_scalar(hg.incremental_forward(nll));
            if (lp < 0) {
              cerr << "Log prob < 0 on sentence " << order[si] << ": lp=" << lp << endl;
              assert(lp >= 0.0);
            }
-           hg.backward();
+           hg.backward(nll);
            sgd.update(1.0);
            llh += lp;
            ++si;
@@ -778,23 +693,23 @@ int main(int argc, char** argv) {
 	   const vector<int>& actions=dev_corpus.actions[sii];
            dwords += sentence.size();
            {  ComputationGraph hg;
-              parser.log_prob_parser(&hg,sentence,actions,&right,true);
-              double lp = as_scalar(hg.incremental_forward());
+              Expression nll = parser.log_prob_parser(&hg,sentence,actions,&right, NULL, true);
+              double lp = as_scalar(hg.incremental_forward(nll));
               llh += lp;
            }
            ComputationGraph hg;
-           vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,vector<int>(),&right,true);
+           vector<unsigned> pred;
+	   parser.log_prob_parser(&hg,sentence,vector<int>(),&right, &pred, true);
            unsigned ti = 0;
            for (auto a : pred) {
-                out << adict.Convert(a);
-                if(adict.Convert(a) == "SHIFT"){
-                        out<<" " << posdict.Convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
+                out << adict.convert(a);
+                if(adict.convert(a) == "SHIFT"){
+                        out<<" " << posdict.convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
                         ti++;
                 }
                 out<<endl;
            }
            out << endl;
-           double lp = 0;
            trs += actions.size();
         }
         auto t_end = chrono::high_resolution_clock::now();
@@ -815,7 +730,6 @@ int main(int argc, char** argv) {
         std::string brackstr="Bracketing FMeasure";
         double newfmeasure=0.0;
         std::string strfmeasure="";
-        bool found=0;
         while (getline(evalfile, lineS) && !newfmeasure){
 		if (lineS.compare(0, brackstr.length(), brackstr) == 0) {
 			//std::cout<<lineS<<"\n";
@@ -837,21 +751,18 @@ int main(int argc, char** argv) {
 	  bestf1=newfmeasure;
 	  ostringstream part_os;
   	  part_os << "ntparse"
-     	      << (USE_POS ? "_pos" : "")
-              << '_' << IMPLICIT_REDUCE_AFTER_SHIFT
-              << '_' << LAYERS
-              << '_' << INPUT_DIM
-              << '_' << HIDDEN_DIM
-              << '_' << ACTION_DIM
-              << '_' << LSTM_INPUT_DIM
+     	      << (params.use_pos_tags ? "_pos" : "")
+              << '_' << params.layers
+              << '_' << params.input_dim
+              << '_' << params.hidden_dim
+              << '_' << params.action_dim
+              << '_' << params.lstm_input_dim
               << "-pid" << getpid() 
 	      << "-part" << (tot_seen/corpus.size()) << ".params";
  	  
 	  const string part = part_os.str();
- 
-          ofstream out("model/"+part);
-          boost::archive::text_oarchive oa(out);
-          oa << model;
+ 	  TextFileSaver saver("model/"+part);
+          saver.save(model);
           system("cp dev.eval dev.eval.best");
           // Create a soft link to the most recent model in order to make it
           // easier to refer to it in a shell script.
@@ -876,18 +787,19 @@ int main(int argc, char** argv) {
         double dwords = 0;
         auto t_start = chrono::high_resolution_clock::now();
 	const vector<int> actions;
-	if(conf.count("samples")>0){
+	if(params.samples > 0){
         for (unsigned sii = 0; sii < test_size; ++sii) {
            const auto& sentence=test_corpus.sents[sii];
            dwords += sentence.size();
-           for (unsigned z = 0; z < N_SAMPLES; ++z) {
+           for (unsigned z = 0; z < params.samples; ++z) {
              ComputationGraph hg;
-             vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,actions,&right,true,true);
+             vector<unsigned> pred;
+	     parser.log_prob_parser(&hg,sentence,actions,&right,&pred,true,true);
              int ti = 0;
              for (auto a : pred) {
-             	cout << adict.Convert(a);
-		if (adict.Convert(a) == "SHIFT"){
-			cout<<" "<<posdict.Convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
+             	cout << adict.convert(a);
+		if (adict.convert(a) == "SHIFT"){
+			cout<<" "<<posdict.convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
 			ti++;
 		}
 		cout << endl;
@@ -902,36 +814,36 @@ int main(int argc, char** argv) {
            const auto& sentence=test_corpus.sents[sii];
            const vector<int>& actions=test_corpus.actions[sii];
 /*	   for(unsigned i = 0; i < sentence.size(); i ++){
-	   	out << termdict.Convert(sentence.raw[i])<<" ";
+	   	out << termdict.convert(sentence.raw[i])<<" ";
 	   }
 	   out<<"||| ";
            for(unsigned i = 0; i < sentence.size(); i ++){
-                out << termdict.Convert(sentence.lc[i])<<" ";
+                out << termdict.convert(sentence.lc[i])<<" ";
            }
 	   out<<"||| ";
 	   for(unsigned i = 0; i < sentence.size(); i ++){
-                out << posdict.Convert(sentence.pos[i])<<" ";
+                out << posdict.convert(sentence.pos[i])<<" ";
            }
 	   out<<"\n";*/
            dwords += sentence.size();
            {  ComputationGraph hg;
-              parser.log_prob_parser(&hg,sentence,actions,&right,true);
-              double lp = as_scalar(hg.incremental_forward());
+              Expression nll = parser.log_prob_parser(&hg,sentence,actions,&right,NULL,true);
+              double lp = as_scalar(hg.incremental_forward(nll));
               llh += lp;
            }
            ComputationGraph hg;
-           vector<unsigned> pred = parser.log_prob_parser(&hg,sentence,vector<int>(),&right,true);
+           vector<unsigned> pred;
+	   parser.log_prob_parser(&hg,sentence,vector<int>(),&right,&pred,true);
            unsigned ti = 0;
            for (auto a : pred) {
-           	out << adict.Convert(a);
-		if(adict.Convert(a) == "SHIFT"){
-			out<<" " << posdict.Convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
+           	out << adict.convert(a);
+		if(adict.convert(a) == "SHIFT"){
+			out<<" " << posdict.convert(sentence.pos[ti])<< " " <<sentence.surfaces[ti];
 			ti++;
 		}
 		out<<endl;
 	   }
            out << endl;
-           double lp = 0;
            trs += actions.size();
         }
         

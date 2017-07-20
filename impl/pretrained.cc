@@ -1,11 +1,10 @@
 #include "impl/pretrained.h"
 
 #include <sstream>
-#include "cnn/dict.h"
-#include "impl/compressed-fstream.h"
+#include "dynet/dict.h"
 
 using namespace std;
-using namespace cnn;
+using namespace dynet;
 
 namespace parser {
 
@@ -13,7 +12,7 @@ void ReadEmbeddings_word2vec(const string& fname,
         Dict* dict,
         unordered_map<unsigned, vector<float>>* pretrained) {
   cerr << "Reading pretrained embeddings from " << fname << " ...\n";
-  compressed_ifstream in(fname);
+  ifstream in(fname.c_str());
   string line;
   getline(in, line);
   bool bad = false;
@@ -37,7 +36,7 @@ void ReadEmbeddings_word2vec(const string& fname,
     vector<float> v(dims);
     istringstream iss(line);
     iss >> word;
-    unsigned wordid = dict->Convert(word);
+    unsigned wordid = dict->convert(word);
     for (unsigned i = 0; i < dims; ++i)
       iss >> v[i];
     (*pretrained)[wordid] = v;

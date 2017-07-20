@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 #include <strstream>
-namespace cnn { class Dict; }
+namespace dynet { class Dict; }
 
 namespace parser {
 
@@ -21,16 +21,16 @@ struct Sentence {
 // base class for transition based parse oracles
 struct Oracle {
   virtual ~Oracle();
-  Oracle(cnn::Dict* dict, cnn::Dict* adict, cnn::Dict* pdict) : d(dict), ad(adict), pd(pdict), sents() {}
+  Oracle(dynet::Dict* dict, dynet::Dict* adict, dynet::Dict* pdict) : d(dict), ad(adict), pd(pdict), sents() {}
   unsigned size() const { return sents.size(); }
-  cnn::Dict* d;  // dictionary of terminal symbols
-  cnn::Dict* ad; // dictionary of action types
-  cnn::Dict* pd; // dictionary of POS tags (preterminal symbols)
+  dynet::Dict* d;  // dictionary of terminal symbols
+  dynet::Dict* ad; // dictionary of action types
+  dynet::Dict* pd; // dictionary of POS tags (preterminal symbols)
   std::string devdata;
   std::vector<Sentence> sents;
   std::vector<std::vector<int>> actions;
  protected:
-  static void ReadSentenceView(const std::string& line, cnn::Dict* dict, std::vector<int>* sent);
+  static void ReadSentenceView(const std::string& line, dynet::Dict* dict, std::vector<int>* sent);
 };
 
 // oracle that predicts nonterminal symbols with a PJ(X) action
@@ -40,14 +40,14 @@ struct Oracle {
 // tokens with OOVs replaced
 class KOracle : public Oracle {
  public:
-  KOracle(cnn::Dict* termdict, cnn::Dict* adict, cnn::Dict* pdict, cnn::Dict* nontermdict) :
+  KOracle(dynet::Dict* termdict, dynet::Dict* adict, dynet::Dict* pdict, dynet::Dict* nontermdict) :
       Oracle(termdict, adict, pdict), nd(nontermdict) {}
   // if is_training is true, then both the "raw" tokens and the mapped tokens
   // will be read, and both will be available. if false, then only the mapped
   // tokens will be available
   void load_bdata(const std::string& file);
   void load_oracle(const std::string& file, bool is_training);
-  cnn::Dict* nd; // dictionary of nonterminal types
+  dynet::Dict* nd; // dictionary of nonterminal types
 };
 
 } // namespace parser
