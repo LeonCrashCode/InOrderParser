@@ -9,6 +9,8 @@ This implementation is based on the [cnn library](https://github.com/clab/cnn-v1
     cmake .. -DEIGEN3_INCLUDE_DIR=/path/to/eigen
     make
 
+There are two implementations, Kparser and Kparser-standard. Kparser is used for standard experiments, while Kparser-standard is easy-use.
+
 #### Data
 We borrow the code [get_oracle.py](https://github.com/clab/rnng/blob/master/get_oracle.py) to get top-down oracle
  
@@ -59,7 +61,7 @@ The standard input should follow the fomart, Word1 POS1 Word2 POS2 ... Wordn POS
 
 The standard output is tree in bracketed format.
 
-   (S (INTJ (RB No)) (, ,) (NP (PRP it)) (VP (VBD was) (RB n't) (NP (NNP Black) (NNP Monday))) (. .)) 
+    (S (INTJ (RB No)) (, ,) (NP (PRP it)) (VP (VBD was) (RB n't) (NP (NNP Black) (NNP Monday))) (. .)) 
 
 If you want to sample trees, you should added --samples [number of samples] --a [alpha], for example, --sample 100 --a 0.8
 
