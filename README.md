@@ -63,6 +63,7 @@ The standard output is tree in bracketed format.
 
 If you want to sample trees, you should added --samples [number of samples] --a [alpha], for example, --sample 100 --a 0.8
 
+We will upload the Chinese model soon.
 
 #### Contact
 
