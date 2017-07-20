@@ -62,7 +62,6 @@ unordered_map<unsigned, vector<float>> pretrained;
 void InitCommandLine(int argc, char** argv, po::variables_map* conf) {
   po::options_description opts("Configuration options");
   opts.add_options()
-    //    ("training_data,T", po::value<string>(), "List of Transitions - Training corpus")
         ("samples,s", po::value<unsigned>(), "Sample N trees for each test sentence instead of greedy max decoding")
         ("alpha,a", po::value<float>(), "Flatten (0 < alpha < 1) or sharpen (1 < alpha) sampling distribution")
         ("model_dir,m", po::value<string>(), "Load saved model from this file")
@@ -717,7 +716,109 @@ int main(int argc, char** argv) {
     cout <<"\n";
 
     cout.flush();*/
+
     if(conf.count("samples")>0){
+	for (unsigned z = 0; z < N_SAMPLES; ++z) {
+	    ComputationGraph hg;
+	    vector<unsigned> pred = parser.log_prob_parser(&hg,raw, lc, pos, true);
+	    int ti = 0;
+	    std::vector<std::string> btree;
+            std::vector<int> openidx;
+	    for (auto a : pred) {
+		std::string act = adict.Convert(a);
+		if (act[0] == 'S'){
+		    btree.push_back("("+posdict.Convert(pos[ti])+" "+words[ti]+")");
+		    ti++;
+		}
+		else if(act[0] == 'P'){
+		    std::string tmp = btree.back();
+                    btree.pop_back();
+                    btree.push_back("("+ntermdict.Convert(action2NTindex[a]));
+                    btree.push_back(tmp);
+                    openidx.push_back(btree.size()-2);
+		}
+		else if(act[0] == 'R'){
+		    std::string tmp = btree.back();
+                    btree.pop_back();
+                    int i = btree.size()-1;
+                    while(i >= openidx.back()){
+                        i -= 1;
+                        tmp = btree.back() + " " + tmp;
+                        btree.pop_back();
+                    }
+                    tmp += ")";
+                    btree.push_back(tmp);
+                    openidx.pop_back();
+	    	}
+		else{break;}
+            }
+	    cout<<btree[0]<<"\n";
+       }
+    }
+    else{
+        ComputationGraph hg;
+        vector<unsigned> pred = parser.log_prob_parser(&hg,raw, lc, pos, false);
+        std::vector<std::string> btree;
+        std::vector<int> openidx;
+	int ti = 0;
+        for (auto a : pred) {
+	    std::string act = adict.Convert(a);
+            if (act[0] == 'S'){
+//		cout<<"action: "<<act<<"\n";
+		btree.push_back("("+posdict.Convert(pos[ti])+" "+words[ti]+")");
+            	ti++;
+/*		cout<<"btree: ";
+		for(unsigned i = 0; i < btree.size(); i ++){ cout<<btree[i]<<"|||";}
+		cout<<"\n";
+		cout<<"openidx: ";
+		for(unsigned i = 0; i < openidx.size(); i ++){ cout<<openidx[i]<<"|||";}
+                cout<<"\n";
+*/
+            }
+	    else if(act[0] == 'P'){
+//		cout<<"action: "<<act<<"\n";
+	        std::string tmp = btree.back();
+		btree.pop_back();
+		btree.push_back("("+ntermdict.Convert(action2NTindex[a]));
+		btree.push_back(tmp);
+		openidx.push_back(btree.size()-2);	
+		
+/*                cout<<"btree: ";
+                for(unsigned i = 0; i < btree.size(); i ++){ cout<<btree[i]<<"|||";}
+                cout<<"\n";
+                cout<<"openidx: ";
+                for(unsigned i = 0; i < openidx.size(); i ++){ cout<<openidx[i]<<"|||";}
+                cout<<"\n";
+*/
+	    }
+	    else if(act[0] == 'R'){
+//		cout<<"action: "<<act<<"\n";
+	    	std::string tmp = btree.back();
+		btree.pop_back();
+		int i = btree.size()-1;
+		while(i >= openidx.back()){
+			i -= 1;
+			tmp = btree.back() + " " + tmp;
+			btree.pop_back();
+		}
+		tmp += ")";
+		btree.push_back(tmp);
+		openidx.pop_back();
+	
+/*                cout<<"btree: ";
+                for(unsigned i = 0; i < btree.size(); i ++){ cout<<btree[i]<<"|||";}
+                cout<<"\n";
+                cout<<"openidx: ";
+                for(unsigned i = 0; i < openidx.size(); i ++){ cout<<openidx[i]<<"|||";}
+                cout<<"\n";
+*/
+            }
+	    else {break;}
+        }
+	cout << btree[0] << "\n";
+    }
+
+    /*if(conf.count("samples")>0){
 	for (unsigned z = 0; z < N_SAMPLES; ++z) {
 	    ComputationGraph hg;
 	    vector<unsigned> pred = parser.log_prob_parser(&hg,raw, lc, pos, true);
@@ -746,7 +847,7 @@ int main(int argc, char** argv) {
             cout << endl;
         }
         cout << endl;
-    }
+    }*/
   }
   }
 }
