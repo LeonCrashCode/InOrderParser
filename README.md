@@ -1,7 +1,6 @@
 # InOrderParser
 
-This implementation is based on the [cnn library](https://github.com/clab/cnn-v1) for this software to function. The reference paper is "In-Order Transition-based Constituent Parsing System"
-
+This implementation is based on the [cnn library](https://github.com/clab/cnn-v1) for this software to function. The reference paper is "In-Order Transition-based Constituent Parsing System", which is accepted by Tansactions of ACL.  The system achieves the state-of-the-art results on the standard benchmark PTB and CTB 5.1 by obtaining 91.8 F1 and 86.1 F1, respectively. With sampling and reranking strategy, it achieves 94.2 F1 and 88.0 F1, respectively. By converting to dependencies, it achieves 96.2 UAS (95.2 LAS) and 89.4 UAS (88.4 LAS), respectively. On single i7 CPU, the speed is 60 sentence per second. 
 
 ## Building
 The boost version is 1.5.4.
@@ -61,7 +60,7 @@ The standard output is tree in bracketed format.
 
     (S (INTJ (RB No)) (, ,) (NP (PRP it)) (VP (VBD was) (RB n't) (NP (NNP Black) (NNP Monday))) (. .)) 
 
-If you want to sample trees, you should added --samples [number of samples] --a [alpha], for example, --sample 100 --a 0.8
+If you want to sample trees, you should added --samples [number of samples] --a [alpha], for example, --samples 100 --a 0.8
 
 We will upload the Chinese model soon.
 
