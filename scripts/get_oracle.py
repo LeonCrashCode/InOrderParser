@@ -2,13 +2,16 @@ import sys
 import get_dictionary
 import types
 # tokens is a list of tokens, so no need to split it again
-def unkify(tokens, words_dict):
+def unkify(tokens, words_dict, lang):
     final = []
     for token in tokens:
         # only process the train singletons and unknown words
         if len(token.rstrip()) == 0:
             final.append('UNK')
         elif not(token.rstrip() in words_dict):
+	    if lang == "ch":
+		final.append('UNK')
+		continue;
             numCaps = 0
             hasDigit = False
             hasDash = False
@@ -193,12 +196,14 @@ def get_actions2(trees, actions):
     return actions	
 
 def main():
-    if len(sys.argv) != 3:
-        raise NotImplementedError('Program only takes two arguments:  train file and dev file (for vocabulary mapping purposes)')
-    train_file = open(sys.argv[1], 'r')
+    if len(sys.argv) != 4:
+        raise NotImplementedError('Program only takes three arguments:  en|ch train file and dev file (for vocabulary mapping purposes)')
+    assert sys.argv[1] == "ch" or sys.argv[1] == "en"
+
+    train_file = open(sys.argv[2], 'r')
     lines = train_file.readlines()
     train_file.close()
-    dev_file = open(sys.argv[2], 'r')
+    dev_file = open(sys.argv[3], 'r')
     dev_lines = dev_file.readlines()
     dev_file.close()
     words_list = get_dictionary.get_dict(lines) 
@@ -217,7 +222,7 @@ def main():
         print ' '.join(tags)
         print ' '.join(tokens)
         print ' '.join(lowercase)
-        unkified = unkify(tokens, words_list)    
+        unkified = unkify(tokens, words_list, sys.argv[1])    
         print ' '.join(unkified)
         output_actions = get_actions(line)
 	_, trees = construct(output_actions, [])

@@ -18,9 +18,9 @@ There are two implementations, Kparser and Kparser-standard. Kparser is used for
 
 You could use the scripts to convert the format of training, development and test data, respectively.
 
-    ./get_oracle.py [training data in bracketed format] [training data in bracketed format] > [training oracle]
-    ./get_oracle.py [training data in bracketed format] [development data in bracketed format] > [development oracle]   
-    ./get_oracle.py [training data in bracketed format] [test data in bracketed format] > [test oracle]
+    python ./scripts/get_oracle.py [en|ch] [training data in bracketed format] [training data in bracketed format] > [training oracle]
+    python ./scripts/get_oracle.py [en|ch] [training data in bracketed format] [development data in bracketed format] > [development oracle]   
+    python ./scripts/get_oracle.py [en|ch] [training data in bracketed format] [test data in bracketed format] > [test oracle]
 
 If you require the related data, contact us.
 
@@ -37,7 +37,7 @@ Ensure the related file are linked into the current directory.
 
 The automatically generated file test.eval is the result file.
 
-We provide the trained models: [English model](https://drive.google.com/file/d/0B1VhP65vISjoWmNjN0pfTmh5Vnc/view?usp=sharing) and pretrained word embeddings [sskip.100.vectors](https://drive.google.com/open?id=0B1VhP65vISjoZ3ppTnR3YXRMd1E).
+We provide the trained models: [English model](https://drive.google.com/file/d/0B1VhP65vISjoWmNjN0pfTmh5Vnc/view?usp=sharing) and pretrained word embeddings [sskip.100.vectors](https://drive.google.com/open?id=0B1VhP65vISjoZ3ppTnR3YXRMd1E) for English; [Chinese model](https://drive.google.com/open?id=0B1VhP65vISjoVjZKT2U1amFXVGc) and pretrained word embeddings [zzgiga.sskip.80.vectors](https://drive.google.com/open?id=0B1VhP65vISjoeGJsX2syOGhLWnc) for Chinese
 
 #### Sampling
 
@@ -67,3 +67,4 @@ We will upload the Chinese model soon.
 #### Contact
 
 Jiangming Liu, jmliunlp@gmail.com
+Yue Zhang, yue_zhang@sutd.edu.sg
