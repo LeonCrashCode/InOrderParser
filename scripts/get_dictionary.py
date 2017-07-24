@@ -42,7 +42,7 @@ def get_dict(lines):
     return words_list 
 
 if __name__ == '__main__':
-    input_file = open('02-21.10way.clean.notop', 'r')
+    input_file = open('train.con', 'r')
     lines = input_file.readlines()
     words_list = get_dict(lines) 
     #print 'number of words', len(words_list)

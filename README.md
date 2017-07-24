@@ -48,7 +48,7 @@ The samples.props could be fed into following reranking components.
 
 ## Easy Usage
 
-Download the [model](https://drive.google.com/open?id=0B1VhP65vISjoSXRHelVnSVNYSjA).
+Download the [English model](https://drive.google.com/open?id=0B1VhP65vISjoSXRHelVnSVNYSjA) and the [Chinese model](https://drive.google.com/open?id=0B1VhP65vISjodDM2NW9vRFdOQmM).
 
     ./build/impl/Kparser-standard --cnn-mem 1700 --model_dir [model directory] -w sskip.100.vectors --train_dict [model directory]/train_dict < [stdin] > [stdout]
 

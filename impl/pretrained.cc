@@ -9,7 +9,7 @@ using namespace cnn;
 
 namespace parser {
 
-void ReadEmbeddings_word2vec(const string& fname,
+unsigned ReadEmbeddings_word2vec(const string& fname,
         Dict* dict,
         unordered_map<unsigned, vector<float>>* pretrained) {
   cerr << "Reading pretrained embeddings from " << fname << " ...\n";
@@ -46,6 +46,7 @@ void ReadEmbeddings_word2vec(const string& fname,
     cerr << "[WARNING] mismatched number of words reported and loaded\n";
   }
   cerr << "    done.\n";
+  return dims;
 }
 
 } // namespace parser

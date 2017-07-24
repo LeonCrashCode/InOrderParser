@@ -67,6 +67,7 @@ void InitCommandLine(int argc, char** argv, po::variables_map* conf) {
         ("model_dir,m", po::value<string>(), "Load saved model from this file")
         ("words,w", po::value<string>(), "Pretrained word embeddings")
 	("train_dict", po::value<string>(), "training lexical dictionary")
+	("lang", po::value<string>(), "language setting")
 	("debug","debug")
         ("help,h", "Help");
   po::options_description dcmdline_options;
@@ -501,7 +502,7 @@ bool isupper(char c){if(c >= 'A' && c <= 'Z') return true; return false;}
 bool isdigital(char c){if(c >= '0' && c <= '9') return true; return false;}
 bool isalpha(char c){if(islower(c) || isupper(c)) return true; return false;}
 
-std::string unkized(const std::string word){
+std::string unkized(const std::string& word){
     int numCaps = 0;
     bool hasDigit = false;
     bool hasDash = false;
@@ -562,6 +563,10 @@ std::string unkized(const std::string word){
     }
     return result;
 }
+
+std::string unkized_ch(const std::string word){
+    return "UNK";
+}
 int main(int argc, char** argv) {
   cnn::Initialize(argc, argv);//, 1989121011);
 
@@ -582,7 +587,8 @@ int main(int argc, char** argv) {
     if (N_SAMPLES == 0) { cerr << "Please specify N>0 samples\n"; abort(); }
   }
 
-  assert(conf.count("model_dir") && conf.count("words") && conf.count("train_dict"));
+  assert(conf.count("model_dir") && conf.count("words") && conf.count("train_dict") && conf.count("lang"));
+  assert(conf["lang"].as<string>() == "en" || conf["lang"].as<string>() == "ch");
   std::string model_dir = conf["model_dir"].as<string>();
 
   Model model;
@@ -610,7 +616,7 @@ int main(int argc, char** argv) {
   while(ifs>>word) posdict.Convert(word);
   ifs.close();
 
-  parser::ReadEmbeddings_word2vec(conf["words"].as<string>(), &termdict, &pretrained);
+  PRETRAINED_DIM = parser::ReadEmbeddings_word2vec(conf["words"].as<string>(), &termdict, &pretrained);
 
   termdict.Freeze();
   termdict.SetUnk("UNK");
@@ -684,6 +690,7 @@ int main(int argc, char** argv) {
   vector<int> pos;
   vector<std::string> words;
   while(std::getline(std::cin, line)){
+    if(line == "") continue;
     istrstream istr(line.c_str());
     raw.clear();
     lc.clear();
@@ -693,7 +700,11 @@ int main(int argc, char** argv) {
       words.push_back(word);
 
       if(train_dict.find(word) != train_dict.end()) raw.push_back(termdict.Convert(word));
-      else raw.push_back(termdict.Convert(unkized(word)));
+      else{
+	 if(conf["lang"].as<string>() == "en") raw.push_back(termdict.Convert(unkized(word)));
+	 else if(conf["lang"].as<string>() == "ch") raw.push_back(termdict.Convert(unkized_ch(word)));
+	 else {std::cerr<<"lang error, it should be either en or ch.\n"; abort();}
+      }
 
       std::transform(word.begin(), word.end(), word.begin(), ::tolower);
       lc.push_back(termdict.Convert(word));

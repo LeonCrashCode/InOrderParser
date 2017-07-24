@@ -662,6 +662,24 @@ int main(int argc, char** argv) {
   ntermdict.Freeze();
   posdict.Freeze();
 
+  /*ofstream ofs;
+  ofs.open("terminal.dict");
+  for(int i = 0; i < termdict.size(); ++i) ofs << termdict.Convert(i)<<"\n";
+  ofs.close();
+
+  ofs.open("non-terminal.dict");
+  for(int i = 0; i < ntermdict.size(); ++i) ofs << ntermdict.Convert(i)<<"\n";
+  ofs.close();
+
+  ofs.open("action..dict");
+  for(int i = 0; i < adict.size(); ++i) ofs << adict.Convert(i)<<"\n";
+  ofs.close();
+
+  ofs.open("pos.dict");
+  for(int i = 0; i < posdict.size(); ++i) ofs << posdict.Convert(i)<<"\n";
+  ofs.close();
+
+  exit(1); */
   {  // compute the singletons in the parser's training data
     unordered_map<unsigned, unsigned> counts;
     for (auto& sent : corpus.sents)
