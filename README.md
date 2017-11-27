@@ -64,15 +64,16 @@ If you want to sample trees, you should added --samples [number of samples] --a 
 
 ## Citation
 
-    @article{TACL1199,
-       author = {Liu, Jiangming  and Zhang, Yue },
-       title = {In-Order Transition-based Constituent Parsing},
-       journal = {Transactions of the Association for Computational Linguistics},
-       volume = {5},
-       year = {2017},
-       issn = {2307-387X},
-       url = {https://transacl.org/ojs/index.php/tacl/article/view/1199},
-       pages = {413--424}
+    @article{TACL1199,   
+        author = {Liu, Jiangming  and Zhang, Yue },   
+        title = {In-Order Transition-based Constituent Parsing},   
+        journal = {Transactions of the Association for Computational Linguistics},   
+        volume = {5},   
+        year = {2017},   
+        issn = {2307-387X},   
+        url = {https://transacl.org/ojs/index.php/tacl/article/view/1199},   
+        pages = {413--424}   
+        }
 
 ## Contact
 
