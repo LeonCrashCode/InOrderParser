@@ -67,3 +67,5 @@ If you want to sample trees, you should added --samples [number of samples] --a 
 #### Contact
 
 Jiangming Liu, jmliunlp@gmail.com
+
+Yue Zhang, yue_zhang@sutd.edu.sg
