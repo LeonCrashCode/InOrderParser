@@ -57,6 +57,7 @@ struct Params {
  * \param params Params structure
  * \param task Task
  */
+
 void get_args(int argc,
               char** argv,
               Params& params) {

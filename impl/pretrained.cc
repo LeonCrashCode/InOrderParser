@@ -1,6 +1,7 @@
 #include "impl/pretrained.h"
 
 #include <sstream>
+#include <fstream>
 #include "dynet/dict.h"
 
 using namespace std;

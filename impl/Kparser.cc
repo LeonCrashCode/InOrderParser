@@ -29,7 +29,6 @@
 
 // dictionaries
 dynet::Dict termdict, ntermdict, adict, posdict;
-bool DEBUG;
 volatile bool requested_stop = false;
 
 unsigned ACTION_SIZE = 0;
@@ -172,17 +171,15 @@ Expression log_prob_parser(ComputationGraph* hg,
 		     vector<unsigned> *results,
                      bool is_evaluation,
                      bool sample = false) {
-if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
+if(params.debug) cerr << "sent size: " << sent.size()<<"\n";
     const bool build_training_graph = correct_actions.size() > 0;
     bool apply_dropout = (params.dropout && !is_evaluation);
     stack_lstm.new_graph(*hg);
     action_lstm.new_graph(*hg);
     const_lstm_fwd.new_graph(*hg);
     const_lstm_rev.new_graph(*hg);
-    stack_lstm.start_new_sequence();
     buffer_lstm->new_graph(*hg);
-    buffer_lstm->start_new_sequence();
-    action_lstm.start_new_sequence();
+if(params.debug) cerr<<"apply dropout: "<< apply_dropout<<" "<<params.dropout<<"\n";
     if (apply_dropout) {
       stack_lstm.set_dropout(params.dropout);
       action_lstm.set_dropout(params.dropout);
@@ -196,6 +193,9 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
       const_lstm_fwd.disable_dropout();
       const_lstm_rev.disable_dropout();
     }
+    stack_lstm.start_new_sequence();
+    buffer_lstm->start_new_sequence();
+    action_lstm.start_new_sequence();
     // variables in the computation graph representing the parameters
     Expression pbias = parameter(*hg, p_pbias);
     Expression S = parameter(*hg, p_S);
@@ -205,13 +205,13 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     if (params.use_pos_tags) {
       p2w = parameter(*hg, p_p2w);
     }
-
     Expression ib = parameter(*hg, p_ib);
     Expression cbias = parameter(*hg, p_cbias);
     Expression w2l = parameter(*hg, p_w2l);
     Expression t2l;
     if (pretrained.size() > 0)
       t2l = parameter(*hg, p_t2l);
+
     Expression p2a = parameter(*hg, p_p2a);
     Expression abias = parameter(*hg, p_abias);
     Expression action_start = parameter(*hg, p_action_start);
@@ -222,7 +222,7 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     vector<Expression> buffer(sent.size() + 1);  // variables representing word embeddings
     vector<int> bufferi(sent.size() + 1);  // position of the words in the sentence
     // precompute buffer representation from left to right
-
+if(params.debug) cerr<<"Graph Init\n";
     // in the discriminative model, here we set up the buffer contents
     for (unsigned i = 0; i < sent.size(); ++i) {
         int wordid = sent.raw[i]; // this will be equal to unk at dev/test
@@ -269,15 +269,15 @@ if(DEBUG) cerr << "sent size: " << sent.size()<<"\n";
     while(true){
 	if(prev_a == 'T') break;
       // get list of possible actions for the current parser state
-if(DEBUG) cerr<< "action_count " << action_count <<"\n";
+if(params.debug) cerr<< "action_count " << action_count <<"\n";
       current_valid_actions.clear();
-if(DEBUG) cerr<< "unary: " << unary << "nopen_parens: "<<nopen_parens<<"\n";
+if(params.debug) cerr<< "unary: " << unary << "nopen_parens: "<<nopen_parens<<"\n";
       for (auto a: possible_actions) {
         if (IsActionForbidden_Discriminative(adict.convert(a), prev_a, buffer.size(), stack.size(), nopen_parens, unary))
           continue;
         current_valid_actions.push_back(a);
       }
-if(DEBUG){
+if(params.debug){
 	cerr <<"current_valid_actions: "<<current_valid_actions.size()<<" :";
 	for(unsigned i = 0; i < current_valid_actions.size(); i ++){
 		cerr<<adict.convert(current_valid_actions[i])<<" ";
@@ -361,13 +361,13 @@ if(DEBUG){
       //cerr << "ACT: " << actionString << endl;
       const char ac = actionString[0];
       const char ac2 = actionString[1];
-if(DEBUG){
+if(params.debug){
       
       cerr << "MODEL_ACT: " << adict.convert(model_action)<<" ";
       cerr <<"GOLD_ACT: " << actionString<<"\n";
 }
 
-if(DEBUG) {
+if(params.debug) {
         cerr <<"stacki: ";
         for(unsigned i = 0; i < stacki.size(); i ++){
                 cerr<<stacki[i]<<" ";
@@ -415,7 +415,7 @@ if(DEBUG) {
         Expression nonterminal = lookup(*hg, p_ntup, is_open_paren[i]);
         int nchildren = is_open_paren.size() - i - 1;
         assert(nchildren+1 > 0);
-if(DEBUG) cerr << "  number of children to reduce: " << nchildren << endl;
+if(params.debug) cerr << "  number of children to reduce: " << nchildren << endl;
         vector<Expression> children(nchildren);
         const_lstm_fwd.start_new_sequence();
         const_lstm_rev.start_new_sequence();

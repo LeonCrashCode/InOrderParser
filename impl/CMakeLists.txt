@@ -5,7 +5,7 @@ foreach(TARGET
 #	Kparser-standard
 	)
 ADD_EXECUTABLE(${TARGET} ${TARGET}.cc pretrained.cc oracle.cc)
-  target_link_libraries(${TARGET} cnn ${LIBS})
+  target_link_libraries(${TARGET} dynet ${LIBS})
   if(UNIX AND NOT APPLE)
     target_link_libraries(${TARGET} rt)
   endif()
