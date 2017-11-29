@@ -71,7 +71,6 @@ If you want to sample trees, you should added --samples [number of samples] --a 
         volume = {5},   
         year = {2017},   
         issn = {2307-387X},   
-        url = {https://transacl.org/ojs/index.php/tacl/article/view/1199},   
         pages = {413--424}   
         }
 
